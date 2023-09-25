@@ -1,0 +1,7 @@
+ariel-v8
+logs/ucf_10/44
+| distributed init (rank 1): env://
+| distributed init (rank 0): env://
+| distributed init (rank 2): env://
+| distributed init (rank 3): env://
+slurmstepd: error: *** JOB 30334 ON ariel-v8 CANCELLED AT 2023-08-23T15:40:27 ***

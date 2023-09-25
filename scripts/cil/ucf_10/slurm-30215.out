@@ -1,0 +1,742 @@
+ariel-v5
+logs/ucf_10/41
+| distributed init (rank 3): env://
+| distributed init (rank 4): env://
+| distributed init (rank 5): env://
+| distributed init (rank 0): env://
+| distributed init (rank 1): env://
+| distributed init (rank 2): env://
+Namespace(aa='rand-m7-n4-mstd0.5-inc1', all_tasks=10, attn_drop_rate=0.0, auto_resume=True, batch_size=16, clip_grad=None, color_jitter=0.4, crop_pct=None, cutmix=1.0, cutmix_minmax=None, data_path='data/ucf_10_task', data_set='UCF101', deepscale=False, deepscale_config=None, deepspeed=False, deepspeed_config='logs/ucf_10/41/deepspeed_config.json', deepspeed_mpi=False, device='cuda', disable_eval_during_finetuning=False, dist_eval=True, dist_on_itp=False, dist_url='env://', distributed=True, drop=0.0, drop_path=0.2, enable_deepspeed=True, epochs=50, eval=False, eval_data_path=None, fc_drop_rate=0.5, finetune='/data/bkh178/pretrain/timesformer/videoMAE.pth', gpu=0, grad_from_block=-1, imagenet_default_mean_and_std=True, init_scale=0.001, input_size=224, layer_decay=0.7, local_rank=0, log_dir='logs/ucf_10/41', lr=0.0005, memory_size=1010, memory_video_path=[], min_lr=1e-05, mixup=0.8, mixup_mode='batch', mixup_prob=1.0, mixup_switch_prob=0.5, model='vit_base_patch16_224', model_ema=False, model_ema_decay=0.9999, model_ema_force_cpu=False, model_key='model|module', model_prefix='', momentum=0.9, nb_classes=101, num_frames=16, num_sample=1, num_segments=1, num_workers=10, opt='adamw', opt_betas=[0.9, 0.999], opt_eps=1e-08, output_dir='logs/ucf_10/41', pin_mem=True, rank=0, recount=1, rehearsal_epochs=30, remode='pixel', reprob=0.25, resplit=False, resume='', sampling_rate=4, save_ckpt=True, save_ckpt_freq=50, seed=0, short_side_size=224, smoothing=0.1, start_epoch=0, test_num_crop=1, test_num_segment=1, train_interpolation='bicubic', tubelet_size=2, update_freq=1, use_checkpoint=True, use_mean_pooling=True, val_freq=5, warmup_epochs=5, warmup_lr=1e-08, warmup_steps=-1, weight_decay=0.05, weight_decay_end=None, world_size=6)
+Patch size = (16, 16)
+Load ckpt from /data/bkh178/pretrain/timesformer/videoMAE.pth
+Load state_dict by model_key = model
+Weights of VisionTransformer not initialized from pretrained model: ['cls_token', 'fc_norm.weight', 'fc_norm.bias', 'head.weight', 'head.bias']
+Weights from pretrained model not used in VisionTransformer: ['mask_token', 'decoder.blocks.0.norm1.weight', 'decoder.blocks.0.norm1.bias', 'decoder.blocks.0.attn.q_bias', 'decoder.blocks.0.attn.v_bias', 'decoder.blocks.0.attn.qkv.weight', 'decoder.blocks.0.attn.proj.weight', 'decoder.blocks.0.attn.proj.bias', 'decoder.blocks.0.norm2.weight', 'decoder.blocks.0.norm2.bias', 'decoder.blocks.0.mlp.fc1.weight', 'decoder.blocks.0.mlp.fc1.bias', 'decoder.blocks.0.mlp.fc2.weight', 'decoder.blocks.0.mlp.fc2.bias', 'decoder.blocks.1.norm1.weight', 'decoder.blocks.1.norm1.bias', 'decoder.blocks.1.attn.q_bias', 'decoder.blocks.1.attn.v_bias', 'decoder.blocks.1.attn.qkv.weight', 'decoder.blocks.1.attn.proj.weight', 'decoder.blocks.1.attn.proj.bias', 'decoder.blocks.1.norm2.weight', 'decoder.blocks.1.norm2.bias', 'decoder.blocks.1.mlp.fc1.weight', 'decoder.blocks.1.mlp.fc1.bias', 'decoder.blocks.1.mlp.fc2.weight', 'decoder.blocks.1.mlp.fc2.bias', 'decoder.blocks.2.norm1.weight', 'decoder.blocks.2.norm1.bias', 'decoder.blocks.2.attn.q_bias', 'decoder.blocks.2.attn.v_bias', 'decoder.blocks.2.attn.qkv.weight', 'decoder.blocks.2.attn.proj.weight', 'decoder.blocks.2.attn.proj.bias', 'decoder.blocks.2.norm2.weight', 'decoder.blocks.2.norm2.bias', 'decoder.blocks.2.mlp.fc1.weight', 'decoder.blocks.2.mlp.fc1.bias', 'decoder.blocks.2.mlp.fc2.weight', 'decoder.blocks.2.mlp.fc2.bias', 'decoder.blocks.3.norm1.weight', 'decoder.blocks.3.norm1.bias', 'decoder.blocks.3.attn.q_bias', 'decoder.blocks.3.attn.v_bias', 'decoder.blocks.3.attn.qkv.weight', 'decoder.blocks.3.attn.proj.weight', 'decoder.blocks.3.attn.proj.bias', 'decoder.blocks.3.norm2.weight', 'decoder.blocks.3.norm2.bias', 'decoder.blocks.3.mlp.fc1.weight', 'decoder.blocks.3.mlp.fc1.bias', 'decoder.blocks.3.mlp.fc2.weight', 'decoder.blocks.3.mlp.fc2.bias', 'decoder.norm.weight', 'decoder.norm.bias', 'decoder.head.weight', 'decoder.head.bias', 'encoder_to_decoder.weight', 'norm.weight', 'norm.bias']
+Model = VisionTransformer(
+  (patch_embed): PatchEmbed(
+    (proj): Conv3d(3, 768, kernel_size=(2, 16, 16), stride=(2, 16, 16))
+  )
+  (pos_drop): Dropout(p=0.0, inplace=False)
+  (blocks): ModuleList(
+    (0): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): Identity()
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (1): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.0181818176060915)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (2): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.036363635212183)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (3): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.05454545468091965)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (4): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.072727270424366)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (5): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.09090908616781235)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (6): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.10909091681241989)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (7): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.12727272510528564)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (8): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.1454545557498932)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (9): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.16363637149333954)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (10): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.1818181872367859)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (11): Block(
+      (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (attn): Attention(
+        (qkv): Linear(in_features=768, out_features=2304, bias=False)
+        (attn_drop): Dropout(p=0.0, inplace=False)
+        (proj): Linear(in_features=768, out_features=768, bias=True)
+        (proj_drop): Dropout(p=0.0, inplace=False)
+      )
+      (drop_path): DropPath(p=0.20000000298023224)
+      (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+      (mlp): Mlp(
+        (fc1): Linear(in_features=768, out_features=3072, bias=True)
+        (act): GELU(approximate='none')
+        (fc2): Linear(in_features=3072, out_features=768, bias=True)
+        (drop): Dropout(p=0.0, inplace=False)
+      )
+    )
+  )
+  (norm): Identity()
+  (fc_norm): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+  (fc_dropout): Dropout(p=0.5, inplace=False)
+  (head): Linear(in_features=768, out_features=101, bias=True)
+)
+number of params: 86305637
+LR = 0.00018750
+Batch size = 96
+Update frequent = 1
+Assigned values = [0.009688901040699992, 0.01384128720099999, 0.019773267429999988, 0.028247524899999984, 0.04035360699999998, 0.05764800999999997, 0.08235429999999996, 0.11764899999999996, 0.16806999999999994, 0.24009999999999995, 0.3429999999999999, 0.48999999999999994, 0.7, 1.0]
+Skip weight decay list:  {'cls_token', 'pos_embed'}
+Param groups = {
+  "layer_0_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "cls_token",
+      "patch_embed.proj.bias"
+    ],
+    "lr_scale": 0.009688901040699992
+  },
+  "layer_0_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "patch_embed.proj.weight"
+    ],
+    "lr_scale": 0.009688901040699992
+  },
+  "layer_1_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.0.norm1.weight",
+      "blocks.0.norm1.bias",
+      "blocks.0.attn.q_bias",
+      "blocks.0.attn.v_bias",
+      "blocks.0.attn.proj.bias",
+      "blocks.0.norm2.weight",
+      "blocks.0.norm2.bias",
+      "blocks.0.mlp.fc1.bias",
+      "blocks.0.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.01384128720099999
+  },
+  "layer_1_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.0.attn.qkv.weight",
+      "blocks.0.attn.proj.weight",
+      "blocks.0.mlp.fc1.weight",
+      "blocks.0.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.01384128720099999
+  },
+  "layer_2_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.1.norm1.weight",
+      "blocks.1.norm1.bias",
+      "blocks.1.attn.q_bias",
+      "blocks.1.attn.v_bias",
+      "blocks.1.attn.proj.bias",
+      "blocks.1.norm2.weight",
+      "blocks.1.norm2.bias",
+      "blocks.1.mlp.fc1.bias",
+      "blocks.1.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.019773267429999988
+  },
+  "layer_2_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.1.attn.qkv.weight",
+      "blocks.1.attn.proj.weight",
+      "blocks.1.mlp.fc1.weight",
+      "blocks.1.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.019773267429999988
+  },
+  "layer_3_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.2.norm1.weight",
+      "blocks.2.norm1.bias",
+      "blocks.2.attn.q_bias",
+      "blocks.2.attn.v_bias",
+      "blocks.2.attn.proj.bias",
+      "blocks.2.norm2.weight",
+      "blocks.2.norm2.bias",
+      "blocks.2.mlp.fc1.bias",
+      "blocks.2.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.028247524899999984
+  },
+  "layer_3_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.2.attn.qkv.weight",
+      "blocks.2.attn.proj.weight",
+      "blocks.2.mlp.fc1.weight",
+      "blocks.2.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.028247524899999984
+  },
+  "layer_4_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.3.norm1.weight",
+      "blocks.3.norm1.bias",
+      "blocks.3.attn.q_bias",
+      "blocks.3.attn.v_bias",
+      "blocks.3.attn.proj.bias",
+      "blocks.3.norm2.weight",
+      "blocks.3.norm2.bias",
+      "blocks.3.mlp.fc1.bias",
+      "blocks.3.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.04035360699999998
+  },
+  "layer_4_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.3.attn.qkv.weight",
+      "blocks.3.attn.proj.weight",
+      "blocks.3.mlp.fc1.weight",
+      "blocks.3.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.04035360699999998
+  },
+  "layer_5_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.4.norm1.weight",
+      "blocks.4.norm1.bias",
+      "blocks.4.attn.q_bias",
+      "blocks.4.attn.v_bias",
+      "blocks.4.attn.proj.bias",
+      "blocks.4.norm2.weight",
+      "blocks.4.norm2.bias",
+      "blocks.4.mlp.fc1.bias",
+      "blocks.4.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.05764800999999997
+  },
+  "layer_5_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.4.attn.qkv.weight",
+      "blocks.4.attn.proj.weight",
+      "blocks.4.mlp.fc1.weight",
+      "blocks.4.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.05764800999999997
+  },
+  "layer_6_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.5.norm1.weight",
+      "blocks.5.norm1.bias",
+      "blocks.5.attn.q_bias",
+      "blocks.5.attn.v_bias",
+      "blocks.5.attn.proj.bias",
+      "blocks.5.norm2.weight",
+      "blocks.5.norm2.bias",
+      "blocks.5.mlp.fc1.bias",
+      "blocks.5.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.08235429999999996
+  },
+  "layer_6_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.5.attn.qkv.weight",
+      "blocks.5.attn.proj.weight",
+      "blocks.5.mlp.fc1.weight",
+      "blocks.5.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.08235429999999996
+  },
+  "layer_7_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.6.norm1.weight",
+      "blocks.6.norm1.bias",
+      "blocks.6.attn.q_bias",
+      "blocks.6.attn.v_bias",
+      "blocks.6.attn.proj.bias",
+      "blocks.6.norm2.weight",
+      "blocks.6.norm2.bias",
+      "blocks.6.mlp.fc1.bias",
+      "blocks.6.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.11764899999999996
+  },
+  "layer_7_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.6.attn.qkv.weight",
+      "blocks.6.attn.proj.weight",
+      "blocks.6.mlp.fc1.weight",
+      "blocks.6.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.11764899999999996
+  },
+  "layer_8_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.7.norm1.weight",
+      "blocks.7.norm1.bias",
+      "blocks.7.attn.q_bias",
+      "blocks.7.attn.v_bias",
+      "blocks.7.attn.proj.bias",
+      "blocks.7.norm2.weight",
+      "blocks.7.norm2.bias",
+      "blocks.7.mlp.fc1.bias",
+      "blocks.7.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.16806999999999994
+  },
+  "layer_8_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.7.attn.qkv.weight",
+      "blocks.7.attn.proj.weight",
+      "blocks.7.mlp.fc1.weight",
+      "blocks.7.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.16806999999999994
+  },
+  "layer_9_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.8.norm1.weight",
+      "blocks.8.norm1.bias",
+      "blocks.8.attn.q_bias",
+      "blocks.8.attn.v_bias",
+      "blocks.8.attn.proj.bias",
+      "blocks.8.norm2.weight",
+      "blocks.8.norm2.bias",
+      "blocks.8.mlp.fc1.bias",
+      "blocks.8.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.24009999999999995
+  },
+  "layer_9_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.8.attn.qkv.weight",
+      "blocks.8.attn.proj.weight",
+      "blocks.8.mlp.fc1.weight",
+      "blocks.8.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.24009999999999995
+  },
+  "layer_10_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.9.norm1.weight",
+      "blocks.9.norm1.bias",
+      "blocks.9.attn.q_bias",
+      "blocks.9.attn.v_bias",
+      "blocks.9.attn.proj.bias",
+      "blocks.9.norm2.weight",
+      "blocks.9.norm2.bias",
+      "blocks.9.mlp.fc1.bias",
+      "blocks.9.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.3429999999999999
+  },
+  "layer_10_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.9.attn.qkv.weight",
+      "blocks.9.attn.proj.weight",
+      "blocks.9.mlp.fc1.weight",
+      "blocks.9.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.3429999999999999
+  },
+  "layer_11_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.10.norm1.weight",
+      "blocks.10.norm1.bias",
+      "blocks.10.attn.q_bias",
+      "blocks.10.attn.v_bias",
+      "blocks.10.attn.proj.bias",
+      "blocks.10.norm2.weight",
+      "blocks.10.norm2.bias",
+      "blocks.10.mlp.fc1.bias",
+      "blocks.10.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.48999999999999994
+  },
+  "layer_11_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.10.attn.qkv.weight",
+      "blocks.10.attn.proj.weight",
+      "blocks.10.mlp.fc1.weight",
+      "blocks.10.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.48999999999999994
+  },
+  "layer_12_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "blocks.11.norm1.weight",
+      "blocks.11.norm1.bias",
+      "blocks.11.attn.q_bias",
+      "blocks.11.attn.v_bias",
+      "blocks.11.attn.proj.bias",
+      "blocks.11.norm2.weight",
+      "blocks.11.norm2.bias",
+      "blocks.11.mlp.fc1.bias",
+      "blocks.11.mlp.fc2.bias"
+    ],
+    "lr_scale": 0.7
+  },
+  "layer_12_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "blocks.11.attn.qkv.weight",
+      "blocks.11.attn.proj.weight",
+      "blocks.11.mlp.fc1.weight",
+      "blocks.11.mlp.fc2.weight"
+    ],
+    "lr_scale": 0.7
+  },
+  "layer_13_no_decay": {
+    "weight_decay": 0.0,
+    "params": [
+      "fc_norm.weight",
+      "fc_norm.bias",
+      "head.bias"
+    ],
+    "lr_scale": 1.0
+  },
+  "layer_13_decay": {
+    "weight_decay": 0.05,
+    "params": [
+      "head.weight"
+    ],
+    "lr_scale": 1.0
+  }
+}
+[2023-08-23 04:23:51,012] [INFO] [logging.py:77:log_dist] [Rank -1] DeepSpeed info: version=0.8.2, git-hash=unknown, git-branch=unknown
+Traceback (most recent call last):
+  File "run_cil.py", line 505, in <module>
+    main(opts, ds_init)
+  File "run_cil.py", line 206, in main
+    args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/__init__.py", line 135, in initialize
+    config_params=config_params)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 272, in __init__
+    self._configure_with_arguments(args, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 1003, in _configure_with_arguments
+    self._config = DeepSpeedConfig(self.config, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 808, in __init__
+    self._configure_train_batch_size()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 991, in _configure_train_batch_size
+    self._batch_assertion()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 939, in _batch_assertion
+    f"Check batch related parameters. train_batch_size is not equal "
+AssertionError: Check batch related parameters. train_batch_size is not equal to micro_batch_per_gpu * gradient_acc_step * world_size 128 != 16 * 1 * 6
+[2023-08-23 04:23:51,170] [INFO] [logging.py:77:log_dist] [Rank -1] DeepSpeed info: version=0.8.2, git-hash=unknown, git-branch=unknown
+Traceback (most recent call last):
+  File "run_cil.py", line 505, in <module>
+    main(opts, ds_init)
+  File "run_cil.py", line 206, in main
+    args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/__init__.py", line 135, in initialize
+    config_params=config_params)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 272, in __init__
+    self._configure_with_arguments(args, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 1003, in _configure_with_arguments
+    self._config = DeepSpeedConfig(self.config, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 808, in __init__
+    self._configure_train_batch_size()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 991, in _configure_train_batch_size
+    self._batch_assertion()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 939, in _batch_assertion
+    f"Check batch related parameters. train_batch_size is not equal "
+AssertionError: Check batch related parameters. train_batch_size is not equal to micro_batch_per_gpu * gradient_acc_step * world_size 128 != 16 * 1 * 6
+[2023-08-23 04:23:51,175] [INFO] [logging.py:77:log_dist] [Rank -1] DeepSpeed info: version=0.8.2, git-hash=unknown, git-branch=unknown
+Traceback (most recent call last):
+  File "run_cil.py", line 505, in <module>
+    main(opts, ds_init)
+  File "run_cil.py", line 206, in main
+    args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/__init__.py", line 135, in initialize
+    config_params=config_params)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 272, in __init__
+    self._configure_with_arguments(args, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 1003, in _configure_with_arguments
+    self._config = DeepSpeedConfig(self.config, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 808, in __init__
+    self._configure_train_batch_size()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 991, in _configure_train_batch_size
+    self._batch_assertion()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 939, in _batch_assertion
+    f"Check batch related parameters. train_batch_size is not equal "
+AssertionError: Check batch related parameters. train_batch_size is not equal to micro_batch_per_gpu * gradient_acc_step * world_size 128 != 16 * 1 * 6
+[2023-08-23 04:23:51,192] [INFO] [logging.py:77:log_dist] [Rank -1] DeepSpeed info: version=0.8.2, git-hash=unknown, git-branch=unknown
+[2023-08-23 04:23:51,193] [INFO] [logging.py:77:log_dist] [Rank -1] DeepSpeed info: version=0.8.2, git-hash=unknown, git-branch=unknown
+Traceback (most recent call last):
+  File "run_cil.py", line 505, in <module>
+    main(opts, ds_init)
+  File "run_cil.py", line 206, in main
+    args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/__init__.py", line 135, in initialize
+    config_params=config_params)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 272, in __init__
+    self._configure_with_arguments(args, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 1003, in _configure_with_arguments
+    self._config = DeepSpeedConfig(self.config, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 808, in __init__
+    self._configure_train_batch_size()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 991, in _configure_train_batch_size
+Traceback (most recent call last):
+  File "run_cil.py", line 505, in <module>
+    self._batch_assertion()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 939, in _batch_assertion
+    main(opts, ds_init)
+  File "run_cil.py", line 206, in main
+    args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+      File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/__init__.py", line 135, in initialize
+f"Check batch related parameters. train_batch_size is not equal "
+AssertionError: Check batch related parameters. train_batch_size is not equal to micro_batch_per_gpu * gradient_acc_step * world_size 128 != 16 * 1 * 6
+    config_params=config_params)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 272, in __init__
+    self._configure_with_arguments(args, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 1003, in _configure_with_arguments
+    self._config = DeepSpeedConfig(self.config, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 808, in __init__
+    self._configure_train_batch_size()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 991, in _configure_train_batch_size
+    self._batch_assertion()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 939, in _batch_assertion
+    f"Check batch related parameters. train_batch_size is not equal "
+AssertionError: Check batch related parameters. train_batch_size is not equal to micro_batch_per_gpu * gradient_acc_step * world_size 128 != 16 * 1 * 6
+[2023-08-23 04:23:51,415] [INFO] [logging.py:77:log_dist] [Rank -1] DeepSpeed info: version=0.8.2, git-hash=unknown, git-branch=unknown
+Traceback (most recent call last):
+  File "run_cil.py", line 505, in <module>
+    main(opts, ds_init)
+  File "run_cil.py", line 206, in main
+    args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/__init__.py", line 135, in initialize
+    config_params=config_params)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 272, in __init__
+    self._configure_with_arguments(args, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/engine.py", line 1003, in _configure_with_arguments
+    self._config = DeepSpeedConfig(self.config, mpu)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 808, in __init__
+    self._configure_train_batch_size()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 991, in _configure_train_batch_size
+    self._batch_assertion()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/deepspeed/runtime/config.py", line 939, in _batch_assertion
+    f"Check batch related parameters. train_batch_size is not equal "
+AssertionError: Check batch related parameters. train_batch_size is not equal to micro_batch_per_gpu * gradient_acc_step * world_size 128 != 16 * 1 * 6
+/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/torch/distributed/launch.py:188: FutureWarning: The module torch.distributed.launch is deprecated
+and will be removed in future. Use torchrun.
+Note that --use_env is set by default in torchrun.
+If your script expects `--local_rank` argument to be set, please
+change it to read from `os.environ['LOCAL_RANK']` instead. See 
+https://pytorch.org/docs/stable/distributed.html#launch-utility for 
+further instructions
+
+  FutureWarning,
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 75814 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 75817 closing signal SIGTERM
+WARNING:torch.distributed.elastic.multiprocessing.api:Sending process 75818 closing signal SIGTERM
+ERROR:torch.distributed.elastic.multiprocessing.api:failed (exitcode: 1) local_rank: 1 (pid: 75815) of binary: /data/bkh178/anaconda3/envs/videoMAE/bin/python
+Traceback (most recent call last):
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/runpy.py", line 193, in _run_module_as_main
+    "__main__", mod_spec)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/runpy.py", line 85, in _run_code
+    exec(code, run_globals)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/torch/distributed/launch.py", line 195, in <module>
+    main()
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/torch/distributed/launch.py", line 191, in main
+    launch(args)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/torch/distributed/launch.py", line 176, in launch
+    run(args)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/torch/distributed/run.py", line 756, in run
+    )(*cmd_args)
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/torch/distributed/launcher/api.py", line 132, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/data/bkh178/anaconda3/envs/videoMAE/lib/python3.7/site-packages/torch/distributed/launcher/api.py", line 248, in launch_agent
+    failures=result.failures,
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+run_cil.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2023-08-23_04:23:52
+  host      : ariel-v5
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 75816)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2023-08-23_04:23:52
+  host      : ariel-v5
+  rank      : 5 (local_rank: 5)
+  exitcode  : 1 (pid: 75819)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2023-08-23_04:23:52
+  host      : ariel-v5
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 75815)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
