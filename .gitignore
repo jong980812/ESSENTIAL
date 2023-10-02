@@ -1,2 +1,5 @@
-/figs
-/logs
+
+logs/
+scripts/
+__pycache__/
+.vscode/

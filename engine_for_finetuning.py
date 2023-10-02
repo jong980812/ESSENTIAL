@@ -10,13 +10,8 @@ import utils
 from scipy.special import softmax
 
 
-def train_class_batch(model, samples, target, criterion,current_classes):
+def train_class_batch(model, samples, target, criterion):
     outputs = model(samples)
-    mask = torch.zeros_like(outputs, dtype=torch.bool)
-    for c in current_classes:
-        mask[:, c] = True
-    outputs[~mask] = float('-1000')
-    target[~mask] = float(0)
     loss = criterion(outputs, target)
     return loss, outputs
 
@@ -28,16 +23,16 @@ def get_loss_scale_for_deepspeed(model):
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, loss_scaler, max_norm: float = float(0),
+                    device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, log_writer=None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None,current_classes=[],header='Epoch'):
+                    num_training_steps_per_epoch=None, update_freq=None):
     model.train(True)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = f'{header}: [{epoch}]'
-    print_freq = 50
+    header = 'Epoch: [{}]'.format(epoch)
+    print_freq = 10
 
     if loss_scaler is None:
         model.zero_grad()
@@ -67,11 +62,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if loss_scaler is None:
             samples = samples.half()
             loss, output = train_class_batch(
-                model, samples, targets, criterion,current_classes)
+                model, samples, targets, criterion)
         else:
             with torch.cuda.amp.autocast():
                 loss, output = train_class_batch(
-                    model, samples, targets, criterion,current_classes)
+                    model, samples, targets, criterion)
 
         loss_value = loss.item()
 
@@ -138,7 +133,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             log_writer.update(grad_norm=grad_norm, head="opt")
 
             log_writer.set_step()
-        
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -146,43 +141,37 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def validation_one_epoch(data_loader_lst, model, device,header='Val:'):
-    #TODO forgetting
+def validation_one_epoch(data_loader, model, device):
     criterion = torch.nn.CrossEntropyLoss()
+
     metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Val:'
 
     # switch to evaluation mode
     model.eval()
-    for n_task,data_loader in enumerate(data_loader_lst):
-        _metric_logger = utils.MetricLogger(delimiter="  ")
-        print(f'valid len dataloader task : {n_task+1} || len_loader {len(data_loader)}')
-        # for batch in _metric_logger.log_every(data_loader, 10, header):
-        for batch in _metric_logger.log_every(data_loader, 10, header):
-            videos = batch[0]
-            target = batch[1]
-            videos = videos.to(device, non_blocking=True)
-            target = target.to(device, non_blocking=True)
 
-            # compute output
-            with torch.cuda.amp.autocast():
-                output = model(videos)
-                loss = criterion(output, target)
+    for batch in metric_logger.log_every(data_loader, 10, header):
+        videos = batch[0]
+        target = batch[1]
+        videos = videos.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
 
-            acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        # compute output
+        with torch.cuda.amp.autocast():
+            output = model(videos)
+            loss = criterion(output, target)
 
-            batch_size = videos.shape[0]
-            _metric_logger.update(loss=loss.item())
-            _metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-            _metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
-    
-        # gather the stats from all processes
-        _metric_logger.synchronize_between_processes()
-        print(f'{header} Current task task : {n_task+1}/{len(data_loader_lst)}')
-        print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
-            .format(top1=_metric_logger.acc1, top5=_metric_logger.acc5, losses=_metric_logger.loss))
-        # for cil acc (Average of all accs up to the current task)
-        metric_logger.meters['total_acc1'].update(_metric_logger.acc1.global_avg)
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+
+        batch_size = videos.shape[0]
+        metric_logger.update(loss=loss.item())
+        metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
+        metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+    # gather the stats from all processes
     metric_logger.synchronize_between_processes()
+    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
+          .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
+
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 

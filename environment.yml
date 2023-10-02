@@ -1,0 +1,4 @@
+name: old_environment_name
+channels:
+  - defaults
+prefix: /data/gyeongho/miniconda3/envs/old_environment_name

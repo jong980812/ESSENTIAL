@@ -11,8 +11,13 @@ from decord import VideoReader, cpu
 from torch.utils.data import Dataset
 import video_transforms as video_transforms 
 import volume_transforms as volume_transforms
-import utils
 import torch.distributed as dist
+import math
+import sys
+import os
+import av
+from PIL import Image
+os.environ["FFMPEG_LOG_LEVEL"] = "panic"
 
 def write_to_file(data, filename):
     with open(filename, "w") as f:
@@ -24,18 +29,17 @@ def read_from_file(filename):
         return [line.strip() for line in f.readlines()]
 
 
-class KineticsDataset(Dataset):
+class ActivitynetDataset(Dataset):
     """Load your own video classification dataset."""
 
     def __init__(self, anno_list, data_path, mode='train', clip_len=8,
-                 frame_sample_rate=2, crop_size=224, short_side_size=256,
+                 crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1):
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='pyav'):
         self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
         self.clip_len = clip_len
-        self.frame_sample_rate = frame_sample_rate
         self.crop_size = crop_size
         self.short_side_size = short_side_size
         self.new_height = new_height
@@ -48,6 +52,12 @@ class KineticsDataset(Dataset):
         self.args = args
         self.aug = False
         self.rand_erase = False
+        if loader == 'decord':
+            self.loader = self.loadvideo_decord
+        elif loader =='pyav':
+            self.loader = self.loadvideo_pyav
+        
+        
         if self.mode in ['train']:
             self.aug = True
             if self.args.reprob > 0:
@@ -55,28 +65,34 @@ class KineticsDataset(Dataset):
         if VideoReader is None:
             raise ImportError("Unable to import `decord` which is required to read videos.")
 
-        import pandas as pd
-        self.dataset_samples = [os.path.join(self.data_path,i.split(' ')[0]) for i in self.anno_list]
-        self.label_array = [int(i.split(' ')[-1]) for i in self.anno_list]
-        
-        #### rehearsal memory
-        if utils.is_main_process():
-            # Manage rehearsal memory only in main process
-            if args.memory_size > 0 and mode == 'train' and task_id >= 0:
-                #if current is negavite value, rehearsal dataset
-                if (args.memory_size-len(args.memory_video_path)) > len(self.anno_list):
-                    args.memory_video_path += self.anno_list
-                else:
-                    need_size = int(args.memory_size / (task_id + 1))
-                    m = len(args.memory_video_path) - (args.memory_size - need_size)                    
-                    indices_to_remove = random.sample(range(len(args.memory_video_path)), m)
-                    args.memory_video_path = [args.memory_video_path[i] for i in range(len(args.memory_video_path)) if i not in indices_to_remove] + random.sample(self.anno_list, need_size)
+     
+        self.label_array = []
+        self.dataset_samples = []
 
-                write_to_file(args.memory_video_path,os.path.join(args.output_dir,'rehearsal_memory.txt'))
+        # label_array와 data_filename 초기화
+        for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
+            for video_info in videos:
+                self.label_array.append(label_num + args.classes_per_task*task_id)
+                self.dataset_samples.append(video_info)
+                
+        # #### rehearsal memory
+        # if utils.is_main_process():
+        #     # Manage rehearsal memory only in main process
+        #     if args.memory_size > 0 and mode == 'train' and task_id >= 0:
+        #         #if current is negavite value, rehearsal dataset
+        #         if (args.memory_size-len(args.memory_video_path)) > len(self.anno_list):
+        #             args.memory_video_path += self.anno_list
+        #         else:
+        #             need_size = int(args.memory_size / (task_id + 1))
+        #             m = len(args.memory_video_path) - (args.memory_size - need_size)                    
+        #             indices_to_remove = random.sample(range(len(args.memory_video_path)), m)
+        #             args.memory_video_path = [args.memory_video_path[i] for i in range(len(args.memory_video_path)) if i not in indices_to_remove] + random.sample(self.anno_list, need_size)
 
-        dist.barrier()
-        args.memory_video_path = read_from_file(os.path.join(args.output_dir,'rehearsal_memory.txt'))
-        assert len(args.memory_video_path) <= args.memory_size
+        #         write_to_file(args.memory_video_path,os.path.join(args.output_dir,'rehearsal_memory.txt'))
+
+        # dist.barrier()
+        # args.memory_video_path = read_from_file(os.path.join(args.output_dir,'rehearsal_memory.txt'))
+        # assert len(args.memory_video_path) <= args.memory_size
 
         if (mode == 'train'):
             pass
@@ -114,14 +130,27 @@ class KineticsDataset(Dataset):
             args = self.args 
             scale_t = 1
 
-            sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t) # T H W C
+            video_info = self.dataset_samples[index]
+            start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
+            end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+            if end_ratio > 1:
+                end_ratio = 1.0
+            video_name = video_info['filename']
+            
+            buffer = self.loader(video_name,start_ratio,end_ratio, sample_rate_scale=scale_t) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
-                    warnings.warn("video {} not correctly loaded during training".format(sample))
+                    print("video {} not correctly loaded during training".format(video_name))
                     index = np.random.randint(self.__len__())
-                    sample = self.dataset_samples[index]
-                    buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t)
+                    
+                    video_info = self.dataset_samples[index]
+                    start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
+                    end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+                    if end_ratio > 1:
+                        end_ratio = 1.0
+                    video_name = video_info['filename']
+            
+                    buffer = self.loader(video_name,start_ratio,end_ratio, sample_rate_scale=scale_t) # T H W C
 
             if args.num_sample > 1:
                 frame_list = []
@@ -140,29 +169,41 @@ class KineticsDataset(Dataset):
             return buffer, self.label_array[index], index, {}
 
         elif self.mode == 'validation':
-            sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample)
+            video_info = self.dataset_samples[index]
+            start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
+            end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+            if end_ratio > 1:
+                end_ratio = 1.0
+
+            video_name = video_info['filename']
+
+            buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
-                    warnings.warn("video {} not correctly loaded during validation".format(sample))
+                    print("video {} not correctly loaded during validation".format(video_info))
                     index = np.random.randint(self.__len__())
-                    sample = self.dataset_samples[index]
-                    buffer = self.loadvideo_decord(sample)
+                    video_info = self.dataset_samples[index]
+                    start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
+                    end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+                    if end_ratio > 1:
+                        end_ratio = 1.0
+                    video_name = video_info['filename']
+                    buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             buffer = self.data_transform(buffer)
-            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
+            return buffer, self.label_array[index], video_name.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':
             sample = self.test_dataset[index]
             chunk_nb, split_nb = self.test_seg[index]
-            buffer = self.loadvideo_decord(sample)
+            buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
 
             while len(buffer) == 0:
-                warnings.warn("video {}, temporal {}, spatial {} not found during testing".format(\
+                print("video {}, temporal {}, spatial {} not found during testing".format(\
                     str(self.test_dataset[index]), chunk_nb, split_nb))
                 index = np.random.randint(self.__len__())
                 sample = self.test_dataset[index]
                 chunk_nb, split_nb = self.test_seg[index]
-                buffer = self.loadvideo_decord(sample)
+                buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
 
             buffer = self.data_resize(buffer)
             if isinstance(buffer, list):
@@ -249,13 +290,23 @@ class KineticsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, sample_rate_scale=1):
+    def loadvideo_decord(self, video_name,start_ratio,end_ratio, sample_rate_scale=1):
         """Load video content using Decord"""
-        fname = sample
+        fname = os.path.join(self.data_path,video_name)
 
-        if not (os.path.exists(fname)):
+        extensions = ['mp4', 'mkv','webm']
+        flag=False
+        for ext in extensions:
+            full_path = os.path.join(f"{fname}.{ext}")
+            if os.path.exists(full_path):
+                fname=full_path
+                flag = True
+                break
+        if not flag:
             return []
-
+        
+        
+        
         # avoid hanging issue
         if os.path.getsize(fname) < 1 * 1024:
             print('SKIP: ', fname, " - ", os.path.getsize(fname))
@@ -271,42 +322,108 @@ class KineticsDataset(Dataset):
             return []
 
         if self.mode == 'test':
-            all_index = [x for x in range(0, len(vr), self.frame_sample_rate)]
-            while len(all_index) < self.clip_len:
+            # TODO test
+            all_index = []
+            tick = len(vr) / float(self.num_segment)
+            all_index = list(np.array([int(tick / 2.0 + tick * x) for x in range(self.num_segment)] +
+                               [int(tick * x) for x in range(self.num_segment)]))
+            while len(all_index) < (self.num_segment * self.test_num_segment):
                 all_index.append(all_index[-1])
+            all_index = list(np.sort(np.array(all_index))) 
             vr.seek(0)
             buffer = vr.get_batch(all_index).asnumpy()
+
             return buffer
 
         # handle temporal segments
-        converted_len = int(self.clip_len * self.frame_sample_rate)
-        seg_len = len(vr) // self.num_segment
-
+        start_frame = int(start_ratio * len(vr))
+        end_frame = math.ceil(end_ratio * len(vr))
+        video_length = end_frame-start_frame
+        average_duration = video_length // self.num_segment
         all_index = []
-        for i in range(self.num_segment):
-            if seg_len <= converted_len:
-                index = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
-                index = np.concatenate((index, np.ones(self.clip_len - seg_len // self.frame_sample_rate) * seg_len))
-                index = np.clip(index, 0, seg_len - 1).astype(np.int64)
-            else:
-                end_idx = np.random.randint(converted_len, seg_len)
-                str_idx = end_idx - converted_len
-                index = np.linspace(str_idx, end_idx, num=self.clip_len)
-                index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
-            index = index + i*seg_len
-            all_index.extend(list(index))
-
-        all_index = all_index[::int(sample_rate_scale)]
+        if average_duration > 0:
+            all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
+        elif video_length > self.num_segment:
+            all_index += list(start_frame + np.sort(np.random.randint(video_length, size=self.num_segment)))
+        else:
+            all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
+        all_index = list(np.array(all_index)) 
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
+
         return buffer
+
+
+    def loadvideo_pyav(self, video_name, start_ratio, end_ratio, sample_rate_scale=1):
+        """Load video content using PyAV"""
+        fname = os.path.join(self.data_path, video_name)
+
+        extensions = ['mp4', 'mkv', 'webm']
+        flag = False
+        for ext in extensions:
+            full_path = os.path.join(f"{fname}.{ext}")
+            if os.path.exists(full_path):
+                fname = full_path
+                flag = True
+                break
+        if not flag:
+            return []
+
+        # avoid hanging issue
+        if os.path.getsize(fname) < 1 * 1024:
+            print('SKIP: ', fname, " - ", os.path.getsize(fname))
+            return []
+
+        try:
+            container = av.open(fname)
+            video_stream = container.streams.video[0]
+            total_frames = video_stream.frames
+        except:
+            print("video cannot be loaded by pyav: ", fname)
+            return []
+
+        if self.mode == 'test':
+            # TODO test
+            pass
+        # handle temporal segments
+        start_frame = int(start_ratio * total_frames)
+        end_frame = math.ceil(end_ratio * total_frames)
+        video_length = end_frame - start_frame
+        if video_length == 0:
+            # Activitynet's mkv and webm files do not provide head information. Therefore, using the estimated value
+            video_length = int(float(container.duration) / av.time_base * video_stream.base_rate)-1
+        average_duration = video_length // self.num_segment
+        all_index = []
+        if average_duration > 0:
+            all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
+        elif video_length > self.num_segment:
+            all_index += list(start_frame + np.sort(np.random.randint(video_length, size=self.num_segment)))
+        else:
+            all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
+        all_index = list(np.array(all_index))
+
+        buffer = []
+        for idx in all_index:
+            idx = int(idx)
+            container.seek(idx, stream=video_stream)
+            for frame in container.decode(video=0):
+                img = frame.to_image()  # Convert to PIL Image
+                if self.keep_aspect_ratio:
+                    # Resize while keeping aspect ratio
+                    img = img.resize((self.new_width, self.new_height), Image.ANTIALIAS)
+                buffer.append(np.array(img))
+                break
+
+        return buffer
+
+
+
 
     def __len__(self):
         if self.mode != 'test':
             return len(self.dataset_samples)
         else:
             return len(self.test_dataset)
-
 
 def spatial_sampling(
     frames,
@@ -400,188 +517,3 @@ def tensor_normalize(tensor, mean, std):
     tensor = tensor - mean
     tensor = tensor / std
     return tensor
-
-
-class VideoMAE(torch.utils.data.Dataset):
-    """Load your own video classification dataset.
-    Parameters
-    ----------
-    root : str, required.
-        Path to the root folder storing the dataset.
-    setting : str, required.
-        A text file describing the dataset, each line per video sample.
-        There are three items in each line: (1) video path; (2) video length and (3) video label.
-    train : bool, default True.
-        Whether to load the training or validation set.
-    test_mode : bool, default False.
-        Whether to perform evaluation on the test set.
-        Usually there is three-crop or ten-crop evaluation strategy involved.
-    name_pattern : str, default None.
-        The naming pattern of the decoded video frames.
-        For example, img_00012.jpg.
-    video_ext : str, default 'mp4'.
-        If video_loader is set to True, please specify the video format accordinly.
-    is_color : bool, default True.
-        Whether the loaded image is color or grayscale.
-    modality : str, default 'rgb'.
-        Input modalities, we support only rgb video frames for now.
-        Will add support for rgb difference image and optical flow image later.
-    num_segments : int, default 1.
-        Number of segments to evenly divide the video into clips.
-        A useful technique to obtain global video-level information.
-        Limin Wang, etal, Temporal Segment Networks: Towards Good Practices for Deep Action Recognition, ECCV 2016.
-    num_crop : int, default 1.
-        Number of crops for each image. default is 1.
-        Common choices are three crops and ten crops during evaluation.
-    new_length : int, default 1.
-        The length of input video clip. Default is a single image, but it can be multiple video frames.
-        For example, new_length=16 means we will extract a video clip of consecutive 16 frames.
-    new_step : int, default 1.
-        Temporal sampling rate. For example, new_step=1 means we will extract a video clip of consecutive frames.
-        new_step=2 means we will extract a video clip of every other frame.
-    temporal_jitter : bool, default False.
-        Whether to temporally jitter if new_step > 1.
-    video_loader : bool, default False.
-        Whether to use video loader to load data.
-    use_decord : bool, default True.
-        Whether to use Decord video loader to load data. Otherwise use mmcv video loader.
-    transform : function, default None.
-        A function that takes data and label and transforms them.
-    data_aug : str, default 'v1'.
-        Different types of data augmentation auto. Supports v1, v2, v3 and v4.
-    lazy_init : bool, default False.
-        If set to True, build a dataset instance without loading any dataset.
-    """
-    def __init__(self,
-                 root,
-                 setting,
-                 train=True,
-                 test_mode=False,
-                 name_pattern='img_%05d.jpg',
-                 video_ext='mp4',
-                 is_color=True,
-                 modality='rgb',
-                 num_segments=1,
-                 num_crop=1,
-                 new_length=1,
-                 new_step=1,
-                 transform=None,
-                 temporal_jitter=False,
-                 video_loader=False,
-                 use_decord=False,
-                 lazy_init=False):
-
-        super(VideoMAE, self).__init__()
-        self.root = root
-        self.setting = setting
-        self.train = train
-        self.test_mode = test_mode
-        self.is_color = is_color
-        self.modality = modality
-        self.num_segments = num_segments
-        self.num_crop = num_crop
-        self.new_length = new_length
-        self.new_step = new_step
-        self.skip_length = self.new_length * self.new_step
-        self.temporal_jitter = temporal_jitter
-        self.name_pattern = name_pattern
-        self.video_loader = video_loader
-        self.video_ext = video_ext
-        self.use_decord = use_decord
-        self.transform = transform
-        self.lazy_init = lazy_init
-
-
-        if not self.lazy_init:
-            self.clips = self._make_dataset(root, setting)
-            if len(self.clips) == 0:
-                raise(RuntimeError("Found 0 video clips in subfolders of: " + root + "\n"
-                                   "Check your data directory (opt.data-dir)."))
-
-    def __getitem__(self, index):
-
-        directory, target = self.clips[index]
-        if self.video_loader:
-            if '.' in directory.split('/')[-1]:
-                # data in the "setting" file already have extension, e.g., demo.mp4
-                video_name = directory
-            else:
-                # data in the "setting" file do not have extension, e.g., demo
-                # So we need to provide extension (i.e., .mp4) to complete the file name.
-                video_name = '{}.{}'.format(directory, self.video_ext)
-
-            decord_vr = decord.VideoReader(video_name, num_threads=1)
-            duration = len(decord_vr)
-
-        segment_indices, skip_offsets = self._sample_train_indices(duration)
-
-        images = self._video_TSN_decord_batch_loader(directory, decord_vr, duration, segment_indices, skip_offsets)
-
-        process_data, mask = self.transform((images, None)) # T*C,H,W
-        process_data = process_data.view((self.new_length, 3) + process_data.size()[-2:]).transpose(0,1)  # T*C,H,W -> T,C,H,W -> C,T,H,W
-        
-        return (process_data, mask)
-
-    def __len__(self):
-        return len(self.clips)
-
-    def _make_dataset(self, directory, setting):
-        if not os.path.exists(setting):
-            raise(RuntimeError("Setting file %s doesn't exist. Check opt.train-list and opt.val-list. " % (setting)))
-        clips = []
-        with open(setting) as split_f:
-            data = split_f.readlines()
-            for line in data:
-                line_info = line.split(' ')
-                # line format: video_path, video_duration, video_label
-                if len(line_info) < 2:
-                    raise(RuntimeError('Video input format is not correct, missing one or more element. %s' % line))
-                # hard coding for kinetics path
-                clip_path = os.path.join("/local_datasets/kinetics400",line_info[0])
-                target = int(line_info[1])
-                item = (clip_path, target)
-                clips.append(item)
-        return clips
-
-    def _sample_train_indices(self, num_frames):
-        average_duration = (num_frames - self.skip_length + 1) // self.num_segments
-        if average_duration > 0:
-            offsets = np.multiply(list(range(self.num_segments)),
-                                  average_duration)
-            offsets = offsets + np.random.randint(average_duration,
-                                                  size=self.num_segments)
-        elif num_frames > max(self.num_segments, self.skip_length):
-            offsets = np.sort(np.random.randint(
-                num_frames - self.skip_length + 1,
-                size=self.num_segments))
-        else:
-            offsets = np.zeros((self.num_segments,))
-
-        if self.temporal_jitter:
-            skip_offsets = np.random.randint(
-                self.new_step, size=self.skip_length // self.new_step)
-        else:
-            skip_offsets = np.zeros(
-                self.skip_length // self.new_step, dtype=int)
-        return offsets + 1, skip_offsets
-
-
-    def _video_TSN_decord_batch_loader(self, directory, video_reader, duration, indices, skip_offsets):
-        sampled_list = []
-        frame_id_list = []
-        for seg_ind in indices:
-            offset = int(seg_ind)
-            for i, _ in enumerate(range(0, self.skip_length, self.new_step)):
-                if offset + skip_offsets[i] <= duration:
-                    frame_id = offset + skip_offsets[i] - 1
-                else:
-                    frame_id = offset - 1
-                frame_id_list.append(frame_id)
-                if offset + self.new_step < duration:
-                    offset += self.new_step
-        try:
-            video_data = video_reader.get_batch(frame_id_list).asnumpy()
-            sampled_list = [Image.fromarray(video_data[vid, :, :, :]).convert('RGB') for vid, _ in enumerate(frame_id_list)]
-        except:
-            raise RuntimeError('Error occured in reading frames {} from video {} of duration {}.'.format(frame_id_list, directory, duration))
-        return sampled_list
