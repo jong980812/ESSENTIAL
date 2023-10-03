@@ -163,7 +163,7 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
     stat_matrix = np.zeros((3, args.num_tasks)) # 3 for Acc@1, Acc@5, Loss
     print('eval')
     for i in range(task_id+1):
-        print(f'task {task_id}/{args.num_tasks}')
+        print(f'task {task_id+1}/{args.num_tasks}')
         
         if test_mode:
             test_stats = evaluate(model=model, data_loader=data_loader[i]['test'], 
@@ -209,7 +209,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
 
     for task_id in range(args.num_tasks):
-        print(f'task {task_id}/{args.num_tasks}')
+        print(f'task {task_id+1}/{args.num_tasks}')
         
        # lr scehdule
         total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
@@ -282,8 +282,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
-
-
 
     print('test')
     test_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 

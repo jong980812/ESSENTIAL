@@ -378,6 +378,10 @@ class ActivitynetDataset(Dataset):
             container = av.open(fname)
             video_stream = container.streams.video[0]
             total_frames = video_stream.frames
+            if total_frames == 0:
+                # Activitynet's mkv and webm files do not provide head information. Therefore, using the estimated value
+                total_frames = int(float(container.duration) / av.time_base * video_stream.base_rate)-1
+            
         except:
             print("video cannot be loaded by pyav: ", fname)
             return []
@@ -389,9 +393,9 @@ class ActivitynetDataset(Dataset):
         start_frame = int(start_ratio * total_frames)
         end_frame = math.ceil(end_ratio * total_frames)
         video_length = end_frame - start_frame
-        if video_length == 0:
-            # Activitynet's mkv and webm files do not provide head information. Therefore, using the estimated value
-            video_length = int(float(container.duration) / av.time_base * video_stream.base_rate)-1
+        if video_length == 0 :
+            print("video_length error: ", fname)
+            raise ValueError('Wrong video_length')
         average_duration = video_length // self.num_segment
         all_index = []
         if average_duration > 0:
