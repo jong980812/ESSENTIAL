@@ -45,7 +45,7 @@ def train_one_epoch(model: torch.nn.Module,
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = f'Task {task_id}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'
+    header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'
     print_freq = 50
 
     for data_iter_step, (samples, targets, _, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
@@ -213,7 +213,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         
        # lr scehdule
         total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
-        num_training_steps_per_epoch = len(data_loader[task_id]['train']) // total_batch_size
+        num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
         print("Use step level LR scheduler!")
         lr_schedule_values = utils.cosine_scheduler(
             args.lr, args.min_lr, args.epochs, num_training_steps_per_epoch,

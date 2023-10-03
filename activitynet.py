@@ -394,8 +394,8 @@ class ActivitynetDataset(Dataset):
         end_frame = math.ceil(end_ratio * total_frames)
         video_length = end_frame - start_frame
         if video_length == 0 :
-            print("video_length error: ", fname)
-            raise ValueError('Wrong video_length')
+            video_length = (end_frame+30) - (start_frame-30)
+            print("video_length is zero: ", fname)
         average_duration = video_length // self.num_segment
         all_index = []
         if average_duration > 0:
