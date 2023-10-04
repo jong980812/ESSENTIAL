@@ -406,12 +406,14 @@ class ActivitynetDataset(Dataset):
         end_frame = math.ceil(end_ratio * total_frames)
         video_length = end_frame - start_frame
         if video_length < 32 :
-            if start_frame < 32:
-                video_length = (end_frame+40) - (start_frame)
-            elif total_frames-end_frame < 32:
-                video_length = (end_frame) - (start_frame-40)
-            else:
-                video_length = (end_frame+20) - (start_frame-20)
+            deficit = 32 - video_length
+            front_padding = min(deficit // 2, start_frame)
+            end_padding = min(deficit - front_padding, total_frames - end_frame)
+            
+            start_frame -= front_padding
+            end_frame += end_padding
+            
+            video_length = end_frame - start_frame  # Update video_length
             print("video_length is short: ", fname)
         average_duration = video_length // self.num_segment
         all_index = []
@@ -437,9 +439,8 @@ class ActivitynetDataset(Dataset):
                 if current_idx == len(all_index):
                     break
         if not self.num_segment == len(buffer):
-            print(fname)
-            print(all_index)
-            print(len(buffer))
+            while len(buffer) < self.num_segment:
+                buffer.append(np.copy(buffer[-1]))
         return buffer
 
 
