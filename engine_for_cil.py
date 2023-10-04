@@ -17,11 +17,10 @@ def train_class_batch(model, samples, target, criterion,mask,args,device):
     
 
     outputs = model(samples)
-    not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
-    not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
-    outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
-    
-    
+    if mask is not None:
+        not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
+        not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
+        outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
     loss = criterion(outputs, target)
     return loss, outputs
 
@@ -35,7 +34,7 @@ def train_one_epoch(model: torch.nn.Module,
                     device: torch.device, epoch: int, max_norm: float = 0,
                     set_training_mode=True, task_id=-1, class_mask=None, args = None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None
+                    num_training_steps_per_epoch=None, update_freq=None,header=None
                     ):
 
     model.train(set_training_mode)
@@ -45,8 +44,8 @@ def train_one_epoch(model: torch.nn.Module,
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'
-    print_freq = 50
+    header = header
+    print_freq = 10
 
     for data_iter_step, (samples, targets, _, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
@@ -63,7 +62,9 @@ def train_one_epoch(model: torch.nn.Module,
 
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
-        mask = class_mask[task_id]
+        mask = None
+        if class_mask is not None:
+            mask = class_mask[task_id]
 
         samples = samples.half()
         loss, output = train_class_batch(
@@ -207,8 +208,10 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
     # create matrix to save end-of-task accuracies 
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
-
+    rehearsal_stats = {}
     for task_id in range(args.num_tasks):
+        if task_id < 9:
+            continue
         print(f'task {task_id+1}/{args.num_tasks}')
         
        # lr scehdule
@@ -237,14 +240,16 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             loss_scaler = None
             optimizer_params = get_parameter_groups(
                 model, args.weight_decay, args.skip_weight_decay_list,
-                args.ssigner.get_layer_id if args.assigner is not None else None,
+                args.assigner.get_layer_id if args.assigner is not None else None,
                 args.assigner.get_scale if args.assigner is not None else None)
             model, optimizer, _, _ = args.ds_init(
                 args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
             )        
         for epoch in range(args.epochs): 
+            continue
             if args.distributed:
-                data_loader[task_id]['train'].sampler.set_epoch(epoch)          
+                data_loader[task_id]['train'].sampler.set_epoch(epoch)   
+            header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'
             train_stats = train_one_epoch(model=model, criterion=criterion, 
                                         data_loader=data_loader[task_id]['train'], optimizer=optimizer, 
                                         device=device, epoch=epoch, max_norm=args.clip_grad, 
@@ -253,9 +258,23 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                         lr_schedule_values=lr_schedule_values, 
                                         wd_schedule_values=wd_schedule_values,
                                         num_training_steps_per_epoch=num_training_steps_per_epoch, 
-                                        update_freq=args.update_freq,
+                                        update_freq=args.update_freq, header= header
                                         )
-
+        if args.memory_size > 0:
+            for epoch in range(args.rehearsal_epochs): 
+                if args.distributed:
+                    data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
+                header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.epochs}]'
+                rehearsal_stats = train_one_epoch(model=model, criterion=criterion, 
+                                            data_loader=data_loader[task_id]['rehearsal'], optimizer=optimizer, 
+                                            device=device, epoch=epoch, max_norm=args.clip_grad, 
+                                            set_training_mode=True, task_id=task_id, class_mask=None, args=args,
+                                            start_steps=epoch * num_training_steps_per_epoch,
+                                            lr_schedule_values=lr_schedule_values, 
+                                            wd_schedule_values=wd_schedule_values,
+                                            num_training_steps_per_epoch=num_training_steps_per_epoch, 
+                                            update_freq=args.update_freq, header=header
+                                            )
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         if args.output_dir and utils.is_main_process():
@@ -272,6 +291,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             utils.save_on_master(state_dict, checkpoint_path)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+            **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
             **{f'val_{k}': v for k, v in val_stats.items()},
             'epoch': epoch,}
 

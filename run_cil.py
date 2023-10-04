@@ -27,12 +27,12 @@ from utils import  multiple_samples_collate
 from utils import  get_args_cil
 import utils
 from modeling_cil import ViT_CLIP
-
+import modeling_finetune
+import random
 def get_args_cil():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--epochs', default=30, type=int)
-    parser.add_argument('--rehearsal_epochs', default=50, type=int)
     parser.add_argument('--update_freq', default=1, type=int)
     parser.add_argument('--save_ckpt_freq', default=100, type=int)
     parser.add_argument('--val_freq', default=5, type=int)
@@ -41,8 +41,10 @@ def get_args_cil():
     # CIL parameters
     parser.add_argument('--num_tasks', default=10, type=int,
                         help='all_task number')
-    parser.add_argument('--memory_size', default=4040, type=int,help='instance number')
-    parser.add_argument('--memory_video_path', default=[], type=list,help='instance number')
+    parser.add_argument('--memory_size', default=2000, type=int,help='instance number')
+    parser.add_argument('--memory_video_path', default={'dataset_samples':[],
+                                                        'label_array':[]}, type=dict,help='instance number')
+    parser.add_argument('--rehearsal_epochs', default=50, type=int)
 
                         
     # Model parameters
@@ -236,7 +238,7 @@ def main(args, ds_init):
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
-
+    random.seed(seed)
     cudnn.benchmark = True
     model = None
     
@@ -265,21 +267,41 @@ def main(args, ds_init):
 
 
 
-
-    model = ViT_CLIP(
-        input_resolution=224,
-        patch_size=16,
-        num_frames=32,
-        width=768,
-        layers=12,
-        heads=12,
-        drop_path_rate=0.2,
-        adapter_scale=0.5,
-        num_classes=args.nb_classes
+    if args.model == 'clip':
+        model = ViT_CLIP(
+            input_resolution=224,
+            patch_size=16,
+            num_frames=32,
+            width=768,
+            layers=12,
+            heads=12,
+            drop_path_rate=0.2,
+            adapter_scale=0.5,
+            num_classes=args.nb_classes
+        )
+        num_layers = model_without_ddp.layers
+        
+        for name, param in model.named_parameters():
+            if 'temporal_embedding' not in name and 'ln_post' not in name and 'head' not in name and 'Adapter' not in name:
+                param.requires_grad = False
+    else:
+        model = create_model(
+        args.model,
+        pretrained=False,
+        num_classes=args.nb_classes,
+        all_frames=args.num_frames * args.num_segments,
+        tubelet_size=args.tubelet_size,
+        fc_drop_rate=args.fc_drop_rate,
+        drop_rate=args.drop,
+        drop_path_rate=args.drop_path,
+        attn_drop_rate=args.attn_drop_rate,
+        drop_block_rate=None,
+        use_checkpoint=args.use_checkpoint,
+        use_mean_pooling=args.use_mean_pooling,
+        init_scale=args.init_scale,
     )
-    for name, param in model.named_parameters():
-        if 'temporal_embedding' not in name and 'ln_post' not in name and 'head' not in name and 'Adapter' not in name:
-            param.requires_grad = False
+        num_layers = model_without_ddp.get_num_layers()
+
 
     model.to(device)
     model_without_ddp = model
@@ -303,9 +325,7 @@ def main(args, ds_init):
 
 
 
-    # num_layers = model_without_ddp.get_num_layers()
-    num_layers = model_without_ddp.layers
-    args.layer_decay = 10
+
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
     else:

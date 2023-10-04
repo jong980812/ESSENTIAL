@@ -12,7 +12,7 @@ def is_double_list(obj):
     return False
 
 
-def build_dataset(is_train, test_mode,anno_list,task_id, args):
+def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
     if args.data_set == 'Kinetics-400':
 
         if is_train is True:
@@ -38,7 +38,8 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args):
             new_height=256,
             new_width=320,
             args=args,
-            task_id = task_id
+            task_id = task_id,
+            rehearsal=False
             )
     
     elif args.data_set == 'SSV2':
@@ -90,7 +91,8 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args):
             new_height=256,
             new_width=320,
             args=args,
-            task_id = task_id
+            task_id = task_id,
+            rehearsal=rehearsal
             )
     
     else:
@@ -116,6 +118,8 @@ def build_continual_dataloader(args):
             dataset_test = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['val'][i],task_id=i) 
         else:
             dataset_test = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['test'][i],task_id=i)
+        torch.distributed.barrier()
+        dataset_rehearsal = build_dataset(is_train=False, test_mode=False, args=args,anno_list=None,task_id=i,rehearsal = True)
 
 
         # Only consider multi-GPU situations
@@ -124,6 +128,9 @@ def build_continual_dataloader(args):
 
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True)
+        
+        sampler_rehearsal = torch.utils.data.DistributedSampler(
+            dataset_rehearsal, num_replicas=num_tasks, rank=global_rank, shuffle=True)
         
         if args.dist_eval:
             if len(dataset_val) % num_tasks != 0:
@@ -141,7 +148,13 @@ def build_continual_dataloader(args):
             pin_memory=args.pin_mem,
             drop_last=True,
         )
-
+        data_loader_rehearsal = torch.utils.data.DataLoader(
+            dataset_rehearsal, sampler=sampler_rehearsal,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=True,
+        )
         data_loader_val = torch.utils.data.DataLoader(
             dataset_val, sampler=sampler_val,
             batch_size=int(1.5 * args.batch_size),
@@ -157,5 +170,5 @@ def build_continual_dataloader(args):
             drop_last=False
         )
 
-        dataloader.append({'train': data_loader_train, 'val': data_loader_val, 'test':data_loader_test })
+        dataloader.append({'train': data_loader_train, 'val': data_loader_val, 'test':data_loader_test,'rehearsal': data_loader_rehearsal})
     return dataloader, class_mask

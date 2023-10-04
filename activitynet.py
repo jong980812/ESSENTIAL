@@ -17,6 +17,9 @@ import sys
 import os
 import av
 from PIL import Image
+import utils,json
+
+
 os.environ["FFMPEG_LOG_LEVEL"] = "panic"
 
 def write_to_file(data, filename):
@@ -35,7 +38,7 @@ class ActivitynetDataset(Dataset):
     def __init__(self, anno_list, data_path, mode='train', clip_len=8,
                  crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='pyav'):
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='pyav',rehearsal=False):
         self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
@@ -68,31 +71,37 @@ class ActivitynetDataset(Dataset):
      
         self.label_array = []
         self.dataset_samples = []
+        if not rehearsal:
+            for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
+                for video_info in videos:
+                    self.label_array.append(label_num + args.classes_per_task*task_id)
+                    self.dataset_samples.append(video_info)
+        else:
+            with open(os.path.join(args.output_dir,'rehearsal.txt'), 'r') as file:
+                args.memory_video_path = json.load(file)
+            self.label_array = args.memory_video_path['label_array']
+            self.dataset_samples = args.memory_video_path['dataset_samples']
+            self.mode ='train'
 
-        # label_array와 data_filename 초기화
-        for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
-            for video_info in videos:
-                self.label_array.append(label_num + args.classes_per_task*task_id)
-                self.dataset_samples.append(video_info)
-                
-        # #### rehearsal memory
-        # if utils.is_main_process():
-        #     # Manage rehearsal memory only in main process
-        #     if args.memory_size > 0 and mode == 'train' and task_id >= 0:
-        #         #if current is negavite value, rehearsal dataset
-        #         if (args.memory_size-len(args.memory_video_path)) > len(self.anno_list):
-        #             args.memory_video_path += self.anno_list
-        #         else:
-        #             need_size = int(args.memory_size / (task_id + 1))
-        #             m = len(args.memory_video_path) - (args.memory_size - need_size)                    
-        #             indices_to_remove = random.sample(range(len(args.memory_video_path)), m)
-        #             args.memory_video_path = [args.memory_video_path[i] for i in range(len(args.memory_video_path)) if i not in indices_to_remove] + random.sample(self.anno_list, need_size)
 
-        #         write_to_file(args.memory_video_path,os.path.join(args.output_dir,'rehearsal_memory.txt'))
 
-        # dist.barrier()
-        # args.memory_video_path = read_from_file(os.path.join(args.output_dir,'rehearsal_memory.txt'))
-        # assert len(args.memory_video_path) <= args.memory_size
+        if utils.is_main_process() and mode == 'train' and  args.memory_size>0 and not rehearsal:
+            # save video in rehearsal
+            if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
+                args.memory_video_path['dataset_samples'] += self.dataset_samples
+                args.memory_video_path['label_array'] += self.label_array
+            else:
+                need_size = int(args.memory_size / (task_id + 1))
+                m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
+                indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
+                label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + random.sample(self.label_array, need_size)
+                dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + random.sample(self.dataset_samples, need_size)
+                args.memory_video_path['dataset_samples'] = dataset_samples
+                args.memory_video_path['label_array'] = label_array
+            with open(os.path.join(args.output_dir,'rehearsal.txt'), 'w') as file:
+                json.dump(args.memory_video_path, file)
+
+        assert len(args.memory_video_path['label_array']) <= args.memory_size
 
         if (mode == 'train'):
             pass
