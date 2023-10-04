@@ -414,18 +414,19 @@ class ActivitynetDataset(Dataset):
         else:
             all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
         all_index = list(np.array(all_index))
-
+        # TODO 효율적인 방법 찾기
         buffer = []
         for idx in all_index:
             idx = int(idx)
             container.seek(idx, stream=video_stream)
             for frame in container.decode(video=0):
-                img = frame.to_image()  # Convert to PIL Image
-                if self.keep_aspect_ratio:
-                    # Resize while keeping aspect ratio
-                    img = img.resize((self.new_width, self.new_height), Image.ANTIALIAS)
-                buffer.append(np.array(img))
-                break
+                if frame.index == idx:
+                    img = frame.to_image()  # Convert to PIL Image
+                    if self.keep_aspect_ratio:
+                        # Resize while keeping aspect ratio
+                        img = img.resize((self.new_width, self.new_height), Image.ANTIALIAS)
+                    buffer.append(np.array(img))
+                    break
 
         return buffer
 

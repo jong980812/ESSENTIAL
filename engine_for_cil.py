@@ -239,11 +239,11 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             # reinit_optimizer
             loss_scaler = None
             optimizer_params = get_parameter_groups(
-                model, args.weight_decay, args.skip_weight_decay_list,
+                model_without_ddp, args.weight_decay, args.skip_weight_decay_list,
                 args.assigner.get_layer_id if args.assigner is not None else None,
                 args.assigner.get_scale if args.assigner is not None else None)
             model, optimizer, _, _ = args.ds_init(
-                args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+                args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
             )        
         for epoch in range(args.epochs): 
             continue

@@ -279,7 +279,7 @@ def main(args, ds_init):
             adapter_scale=0.5,
             num_classes=args.nb_classes
         )
-        num_layers = model_without_ddp.layers
+        num_layers = model.layers
         
         for name, param in model.named_parameters():
             if 'temporal_embedding' not in name and 'ln_post' not in name and 'head' not in name and 'Adapter' not in name:
@@ -300,8 +300,69 @@ def main(args, ds_init):
         use_mean_pooling=args.use_mean_pooling,
         init_scale=args.init_scale,
     )
-        num_layers = model_without_ddp.get_num_layers()
+        num_layers = model.get_num_layers()
+        if args.finetune:
+                if args.finetune.startswith('https'):
+                    checkpoint = torch.hub.load_state_dict_from_url(
+                        args.finetune, map_location='cpu', check_hash=True)
+                else:
+                    checkpoint = torch.load(args.finetune, map_location='cpu')
 
+                print("Load ckpt from %s" % args.finetune)
+                checkpoint_model = None
+                for model_key in args.model_key.split('|'):
+                    if model_key in checkpoint:
+                        checkpoint_model = checkpoint[model_key]
+                        print("Load state_dict by model_key = %s" % model_key)
+                        break
+                if checkpoint_model is None:
+                    checkpoint_model = checkpoint
+                state_dict = model.state_dict()
+                for k in ['head.weight', 'head.bias']:
+                    if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                        print(f"Removing key {k} from pretrained checkpoint")
+                        del checkpoint_model[k]
+
+                all_keys = list(checkpoint_model.keys())
+                new_dict = OrderedDict()
+                for key in all_keys:
+                    if key.startswith('backbone.'):
+                        new_dict[key[9:]] = checkpoint_model[key]
+                    elif key.startswith('encoder.'):
+                        new_dict[key[8:]] = checkpoint_model[key]
+                    else:
+                        new_dict[key] = checkpoint_model[key]
+                checkpoint_model = new_dict
+
+                # interpolate position embedding
+                if 'pos_embed' in checkpoint_model:
+                    pos_embed_checkpoint = checkpoint_model['pos_embed']
+                    embedding_size = pos_embed_checkpoint.shape[-1] # channel dim
+                    num_patches = model.patch_embed.num_patches # 
+                    num_extra_tokens = model.pos_embed.shape[-2] - num_patches # 0/1
+
+                    # height (== width) for the checkpoint position embedding 
+                    orig_size = int(((pos_embed_checkpoint.shape[-2] - num_extra_tokens)//(args.num_frames // model.patch_embed.tubelet_size)) ** 0.5)
+                    # height (== width) for the new position embedding
+                    new_size = int((num_patches // (args.num_frames // model.patch_embed.tubelet_size) )** 0.5)
+                    # class_token and dist_token are kept unchanged
+                    if orig_size != new_size:
+                        print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
+                        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+                        # only the position tokens are interpolated
+                        pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+                        # B, L, C -> BT, H, W, C -> BT, C, H, W
+                        pos_tokens = pos_tokens.reshape(-1, args.num_frames // model.patch_embed.tubelet_size, orig_size, orig_size, embedding_size)
+                        pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+                        pos_tokens = torch.nn.functional.interpolate(
+                            pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+                        # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
+                        pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(-1, args.num_frames // model.patch_embed.tubelet_size, new_size, new_size, embedding_size) 
+                        pos_tokens = pos_tokens.flatten(1, 3) # B, L, C
+                        new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+                        checkpoint_model['pos_embed'] = new_pos_embed
+
+                utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
 
     model.to(device)
     model_without_ddp = model
