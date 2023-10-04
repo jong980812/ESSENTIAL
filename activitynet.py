@@ -389,8 +389,11 @@ class ActivitynetDataset(Dataset):
             total_frames = video_stream.frames
             if total_frames == 0:
                 # Activitynet's mkv and webm files do not provide head information. Therefore, using the estimated value
-                total_frames = int(float(container.duration) / av.time_base * video_stream.base_rate)-1
-            
+                for frame in container.decode(video=0):
+                    total_frames += 1      
+                container = av.open(fname)
+                video_stream = container.streams.video[0]
+                          
         except:
             print("video cannot be loaded by pyav: ", fname)
             return []
@@ -402,9 +405,14 @@ class ActivitynetDataset(Dataset):
         start_frame = int(start_ratio * total_frames)
         end_frame = math.ceil(end_ratio * total_frames)
         video_length = end_frame - start_frame
-        if video_length == 0 :
-            video_length = (end_frame+30) - (start_frame-30)
-            print("video_length is zero: ", fname)
+        if video_length < 32 :
+            if start_frame < 32:
+                video_length = (end_frame+40) - (start_frame)
+            elif total_frames-end_frame < 32:
+                video_length = (end_frame) - (start_frame-40)
+            else:
+                video_length = (end_frame+20) - (start_frame-20)
+            print("video_length is short: ", fname)
         average_duration = video_length // self.num_segment
         all_index = []
         if average_duration > 0:
@@ -416,18 +424,22 @@ class ActivitynetDataset(Dataset):
         all_index = list(np.array(all_index))
         # TODO 효율적인 방법 찾기
         buffer = []
-        for idx in all_index:
-            idx = int(idx)
-            container.seek(idx, stream=video_stream)
-            for frame in container.decode(video=0):
-                if frame.index == idx:
-                    img = frame.to_image()  # Convert to PIL Image
-                    if self.keep_aspect_ratio:
-                        # Resize while keeping aspect ratio
-                        img = img.resize((self.new_width, self.new_height), Image.ANTIALIAS)
-                    buffer.append(np.array(img))
+        container.seek(0, stream=video_stream) #mkv does not work seek
+        current_idx = 0
+        for frame in container.decode(video=0):
+            if frame.index == all_index[current_idx]:
+                img = frame.to_image()  # Convert to PIL Image
+                if not self.keep_aspect_ratio:
+                    # Resize while keeping aspect ratio
+                    img = img.resize((self.new_width, self.new_height), Image.ANTIALIAS)
+                buffer.append(np.array(img))
+                current_idx += 1
+                if current_idx == len(all_index):
                     break
-
+        if not self.num_segment == len(buffer):
+            print(fname)
+            print(all_index)
+            print(len(buffer))
         return buffer
 
 
