@@ -122,11 +122,10 @@ def train_one_epoch(model: torch.nn.Module,
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module,  data_loader, 
-            device, task_id=-1, class_mask=None, args=None,):
+            device, task_id=-1, class_mask=None, args=None,header=None):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'Test: [Task {}]'.format(task_id + 1)
 
     # switch to evaluation mode
     model.eval()
@@ -164,14 +163,14 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
     stat_matrix = np.zeros((3, args.num_tasks)) # 3 for Acc@1, Acc@5, Loss
     print('eval')
     for i in range(task_id+1):
-        print(f'task {task_id+1}/{args.num_tasks}')
-        
         if test_mode:
+            header = 'Test: [Task {}]'.format(i + 1)
             test_stats = evaluate(model=model, data_loader=data_loader[i]['test'], 
-                                device=device, task_id=i, class_mask=class_mask, args=args)
+                                device=device, task_id=i, class_mask=class_mask, args=args,header=header)
         else:
+            header = 'VAL: [Task {}]'.format(i + 1)
             test_stats = evaluate(model=model, data_loader=data_loader[i]['val'], 
-                                device=device, task_id=i, class_mask=class_mask, args=args)
+                                device=device, task_id=i, class_mask=class_mask, args=args,header=header)
 
         stat_matrix[0, i] = test_stats['Acc@1']
         stat_matrix[1, i] = test_stats['Acc@5']
@@ -205,13 +204,14 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     class_mask=None, args = None,):
 
 
-
+    train_stats = {}
     # create matrix to save end-of-task accuracies 
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
     rehearsal_stats = {}
     for task_id in range(args.num_tasks):
-        if task_id < 9:
-            continue
+        # # ! Debug
+        # if task_id < 6:
+        #     continue
         print(f'task {task_id+1}/{args.num_tasks}')
         
        # lr scehdule
@@ -229,7 +229,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
 
-        print(f"Start training for {args.epochs} epochs")
+        print(f"Start task training for {args.epochs} epochs")
         start_time = time.time()
         #TODO pick best model using validation
         max_accuracy = 0.0
@@ -246,7 +246,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
             )        
         for epoch in range(args.epochs): 
-            continue
+            # # ! Debug
+            # continue
             if args.distributed:
                 data_loader[task_id]['train'].sampler.set_epoch(epoch)   
             header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'
@@ -261,10 +262,27 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                         update_freq=args.update_freq, header= header
                                         )
         if args.memory_size > 0:
+                   # lr scehdule
+            total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
+            num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
+            print("Use step level LR scheduler!")
+            lr_schedule_values = utils.cosine_scheduler(
+                args.lr, args.min_lr, args.rehearsal_epochs, num_training_steps_per_epoch,
+                warmup_epochs=args.warmup_epochs, warmup_steps=args.warmup_steps,
+            )
+            if args.weight_decay_end is None:
+                args.weight_decay_end = args.weight_decay
+            wd_schedule_values = utils.cosine_scheduler(
+                args.weight_decay, args.weight_decay_end, args.rehearsal_epochs, num_training_steps_per_epoch)
+            print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
+
+
+            print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
+            
             for epoch in range(args.rehearsal_epochs): 
                 if args.distributed:
                     data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
-                header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.epochs}]'
+                header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'
                 rehearsal_stats = train_one_epoch(model=model, criterion=criterion, 
                                             data_loader=data_loader[task_id]['rehearsal'], optimizer=optimizer, 
                                             device=device, epoch=epoch, max_norm=args.clip_grad, 
@@ -294,7 +312,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
             **{f'val_{k}': v for k, v in val_stats.items()},
             'epoch': epoch,}
-
+        print(log_stats)
         if args.output_dir and utils.is_main_process():
             with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
                 f.write(json.dumps(log_stats) + '\n')

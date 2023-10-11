@@ -78,7 +78,7 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
 
         dataset = ActivitynetDataset(
             anno_list=anno_list,
-            data_path='/data2/local_datasets/ActivityNet/videos',
+            data_path='/data2/local_datasets/ActivityNet/rawframes',
             mode=mode,
             clip_len=1,
             num_segment=args.num_frames,
@@ -120,6 +120,7 @@ def build_continual_dataloader(args):
             dataset_test = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['test'][i],task_id=i)
         torch.distributed.barrier()
         dataset_rehearsal = build_dataset(is_train=False, test_mode=False, args=args,anno_list=None,task_id=i,rehearsal = True)
+        torch.distributed.barrier()
 
 
         # Only consider multi-GPU situations
