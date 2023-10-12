@@ -209,9 +209,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
     rehearsal_stats = {}
     for task_id in range(args.num_tasks):
-        # # ! Debug
-        # if task_id < 6:
-        #     continue
+        # ! Debug
+        if task_id < 3:
+            continue
         print(f'task {task_id+1}/{args.num_tasks}')
         
        # lr scehdule
@@ -246,8 +246,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
             )        
         for epoch in range(args.epochs): 
-            # # ! Debug
-            # continue
+            # ! Debug
+            continue
             if args.distributed:
                 data_loader[task_id]['train'].sampler.set_epoch(epoch)   
             header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'

@@ -95,8 +95,13 @@ class ActivitynetDataset(Dataset):
                 need_size = int(args.memory_size / (task_id + 1))
                 m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
                 indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
-                label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + random.sample(self.label_array, need_size)
-                dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + random.sample(self.dataset_samples, need_size)
+
+                selected_indices = random.sample(range(len(self.label_array)), need_size)
+                selected_labels = [self.label_array[i] for i in selected_indices]
+                selected_samples = [self.dataset_samples[i] for i in selected_indices]
+                label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
+                dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
+
                 args.memory_video_path['dataset_samples'] = dataset_samples
                 args.memory_video_path['label_array'] = label_array
             with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
@@ -320,9 +325,6 @@ class ActivitynetDataset(Dataset):
         video_length = end_frame - start_frame
         if video_length <= 0:
             print(f"Warning: video_length is zero or negative. Adjusting end_frame. {video_name}")
-            print(start_frame)
-            print(end_frame)
-            print(video_length)
             video_length = 1
         average_duration = video_length // self.num_segment
         all_index = []
