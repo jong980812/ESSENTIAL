@@ -271,7 +271,7 @@ def main(args, ds_init):
         model = ViT_CLIP(
             input_resolution=224,
             patch_size=16,
-            num_frames=32,
+            num_frames=args.num_frames,
             width=768,
             layers=12,
             heads=12,

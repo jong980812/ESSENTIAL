@@ -38,7 +38,7 @@ class ActivitynetDataset(Dataset):
     def __init__(self, anno_list, data_path, mode='train', clip_len=8,
                  crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='pyav',rehearsal=False):
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='frame',rehearsal=False):
         self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
@@ -59,7 +59,8 @@ class ActivitynetDataset(Dataset):
             self.loader = self.loadvideo_decord
         elif loader =='pyav':
             self.loader = self.loadvideo_pyav
-        
+        elif loader =='frame':
+            self.loader = self.load_frames
         
         if self.mode in ['train']:
             self.aug = True
@@ -77,7 +78,7 @@ class ActivitynetDataset(Dataset):
                     self.label_array.append(label_num + args.classes_per_task*task_id)
                     self.dataset_samples.append(video_info)
         else:
-            with open(os.path.join(args.output_dir,'rehearsal.txt'), 'r') as file:
+            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
                 args.memory_video_path = json.load(file)
             self.label_array = args.memory_video_path['label_array']
             self.dataset_samples = args.memory_video_path['dataset_samples']
@@ -98,7 +99,7 @@ class ActivitynetDataset(Dataset):
                 dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + random.sample(self.dataset_samples, need_size)
                 args.memory_video_path['dataset_samples'] = dataset_samples
                 args.memory_video_path['label_array'] = label_array
-            with open(os.path.join(args.output_dir,'rehearsal.txt'), 'w') as file:
+            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
                 json.dump(args.memory_video_path, file)
 
         assert len(args.memory_video_path['label_array']) <= args.memory_size
@@ -140,26 +141,26 @@ class ActivitynetDataset(Dataset):
             scale_t = 1
 
             video_info = self.dataset_samples[index]
-            start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
-            end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+            start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),5)
+            end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),5)
             if end_ratio > 1:
                 end_ratio = 1.0
             video_name = video_info['filename']
             
-            buffer = self.loader(video_name,start_ratio,end_ratio, sample_rate_scale=scale_t) # T H W C
+            buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     print("video {} not correctly loaded during training".format(video_name))
                     index = np.random.randint(self.__len__())
                     
                     video_info = self.dataset_samples[index]
-                    start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
-                    end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+                    start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),5)
+                    end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),5)
                     if end_ratio > 1:
                         end_ratio = 1.0
                     video_name = video_info['filename']
             
-                    buffer = self.loader(video_name,start_ratio,end_ratio, sample_rate_scale=scale_t) # T H W C
+                    buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
 
             if args.num_sample > 1:
                 frame_list = []
@@ -179,8 +180,8 @@ class ActivitynetDataset(Dataset):
 
         elif self.mode == 'validation':
             video_info = self.dataset_samples[index]
-            start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
-            end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+            start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),5)
+            end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),5)
             if end_ratio > 1:
                 end_ratio = 1.0
 
@@ -192,8 +193,8 @@ class ActivitynetDataset(Dataset):
                     print("video {} not correctly loaded during validation".format(video_info))
                     index = np.random.randint(self.__len__())
                     video_info = self.dataset_samples[index]
-                    start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),3)
-                    end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),3)
+                    start_ratio= round(float(video_info['t_start']) / float(video_info['video_duration']),5)
+                    end_ratio= round(float(video_info['t_end']) / float(video_info['video_duration']),5)
                     if end_ratio > 1:
                         end_ratio = 1.0
                     video_name = video_info['filename']
@@ -299,6 +300,58 @@ class ActivitynetDataset(Dataset):
         return buffer
 
 
+    def load_frames(self, video_name, start_ratio, end_ratio):
+        """Load frames directly from directory"""
+        frame_dir = os.path.join(self.data_path, video_name)
+
+        # Check if directory exists
+        if not os.path.exists(frame_dir):
+            print(f"Directory not found: {frame_dir}")
+            return []
+
+        # Get all frame files in the directory and sort them based on the frame number
+        frame_files = sorted([f for f in os.listdir(frame_dir) if os.path.isfile(os.path.join(frame_dir, f)) and f.startswith("img_")], 
+                            key=lambda x: int(x.split('_')[1].split('.')[0]))
+
+        total_frames = len(frame_files)-1
+
+        start_frame = int(start_ratio * total_frames) 
+        end_frame = int(end_ratio * total_frames) 
+        video_length = end_frame - start_frame
+        if video_length <= 0:
+            print(f"Warning: video_length is zero or negative. Adjusting end_frame. {video_name}")
+            print(start_frame)
+            print(end_frame)
+            print(video_length)
+            video_length = 1
+        average_duration = video_length // self.num_segment
+        all_index = []
+
+        if average_duration > 0:
+            all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
+        elif video_length > self.num_segment:
+            all_index += list(start_frame + np.sort(np.random.randint(video_length, size=self.num_segment)))
+        else:
+            all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
+        all_index = [x + 1 for x in all_index]
+
+        buffer = []
+        for idx in all_index:
+            frame_file = os.path.join(frame_dir, frame_files[idx])
+            try:
+                img = Image.open(frame_file)
+                img_array = np.array(img)
+                buffer.append(img_array)
+            except:
+                print(f"Cannot load frame: {frame_file}")
+                return []
+
+        if len(buffer) != self.num_segment:
+            while len(buffer) < self.num_segment:
+                buffer.append(np.copy(buffer[-1]))
+
+        return buffer
+
     def loadvideo_decord(self, video_name,start_ratio,end_ratio, sample_rate_scale=1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,video_name)
@@ -345,9 +398,23 @@ class ActivitynetDataset(Dataset):
             return buffer
 
         # handle temporal segments
-        start_frame = int(start_ratio * len(vr))
-        end_frame = math.ceil(end_ratio * len(vr))
+        total_frames = len(vr)
+        start_frame = int(start_ratio * total_frames)
+        end_frame = math.ceil(end_ratio * total_frames)
         video_length = end_frame-start_frame
+        if video_length ==0:
+            video_length = 1
+        # if video_length < self.num_segment :
+        #     deficit = self.num_segment - video_length
+        #     front_padding = min(deficit // 2, start_frame)
+        #     end_padding = min(deficit - front_padding, total_frames - end_frame)
+            
+        #     start_frame -= front_padding
+        #     end_frame += end_padding
+            
+        #     video_length = end_frame - start_frame  # Update video_length
+        #     print("video_length is short: ", fname)
+            
         average_duration = video_length // self.num_segment
         all_index = []
         if average_duration > 0:
@@ -361,6 +428,9 @@ class ActivitynetDataset(Dataset):
         buffer = vr.get_batch(all_index).asnumpy()
 
         return buffer
+        
+        
+        
 
 
     def loadvideo_pyav(self, video_name, start_ratio, end_ratio, sample_rate_scale=1):
@@ -393,54 +463,48 @@ class ActivitynetDataset(Dataset):
                     total_frames += 1      
                 container = av.open(fname)
                 video_stream = container.streams.video[0]
-                          
+
+            start_frame = int(start_ratio * total_frames)
+            end_frame = math.ceil(end_ratio * total_frames)
+            video_length = end_frame - start_frame
+            if video_length < 32 :
+                deficit = 32 - video_length
+                front_padding = min(deficit // 2, start_frame)
+                end_padding = min(deficit - front_padding, total_frames - end_frame)
+                
+                start_frame -= front_padding
+                end_frame += end_padding
+                
+                video_length = end_frame - start_frame  # Update video_length
+                print("video_length is short: ", fname)
+            average_duration = video_length // self.num_segment
+            all_index = []
+            if average_duration > 0:
+                all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
+            elif video_length > self.num_segment:
+                all_index += list(start_frame + np.sort(np.random.randint(video_length, size=self.num_segment)))
+            else:
+                all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
+            all_index = list(np.array(all_index))
+            # TODO 효율적인 방법 찾기
+            buffer = []
+            container.seek(0, stream=video_stream) #mkv does not work seek
+            current_idx = 0
+            for frame in container.decode(video=0):
+                if frame.index == all_index[current_idx]:
+                    img_array = frame.to_ndarray(format='rgb24')  # Convert to numpy array
+                    buffer.append(img_array)
+                    current_idx += 1
+                    if current_idx == len(all_index):
+                        break
+            if not self.num_segment == len(buffer):
+                while len(buffer) < self.num_segment:
+                    buffer.append(np.copy(buffer[-1]))
+                
         except:
             print("video cannot be loaded by pyav: ", fname)
             return []
 
-        if self.mode == 'test':
-            # TODO test
-            pass
-        # handle temporal segments
-        start_frame = int(start_ratio * total_frames)
-        end_frame = math.ceil(end_ratio * total_frames)
-        video_length = end_frame - start_frame
-        if video_length < 32 :
-            deficit = 32 - video_length
-            front_padding = min(deficit // 2, start_frame)
-            end_padding = min(deficit - front_padding, total_frames - end_frame)
-            
-            start_frame -= front_padding
-            end_frame += end_padding
-            
-            video_length = end_frame - start_frame  # Update video_length
-            print("video_length is short: ", fname)
-        average_duration = video_length // self.num_segment
-        all_index = []
-        if average_duration > 0:
-            all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
-        elif video_length > self.num_segment:
-            all_index += list(start_frame + np.sort(np.random.randint(video_length, size=self.num_segment)))
-        else:
-            all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
-        all_index = list(np.array(all_index))
-        # TODO 효율적인 방법 찾기
-        buffer = []
-        container.seek(0, stream=video_stream) #mkv does not work seek
-        current_idx = 0
-        for frame in container.decode(video=0):
-            if frame.index == all_index[current_idx]:
-                img = frame.to_image()  # Convert to PIL Image
-                if not self.keep_aspect_ratio:
-                    # Resize while keeping aspect ratio
-                    img = img.resize((self.new_width, self.new_height), Image.ANTIALIAS)
-                buffer.append(np.array(img))
-                current_idx += 1
-                if current_idx == len(all_index):
-                    break
-        if not self.num_segment == len(buffer):
-            while len(buffer) < self.num_segment:
-                buffer.append(np.copy(buffer[-1]))
         return buffer
 
 
