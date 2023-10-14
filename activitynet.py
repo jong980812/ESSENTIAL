@@ -146,7 +146,7 @@ class ActivitynetDataset(Dataset):
             if end_ratio > 1:
                 end_ratio = 1.0
             video_name = video_info['filename']
-            
+
             buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
@@ -415,7 +415,7 @@ class ActivitynetDataset(Dataset):
         #     video_length = end_frame - start_frame  # Update video_length
         #     print("video_length is short: ", fname)
             
-        average_duration = video_length // self.num_segment
+        average_duration = video_length // self.num_segment  #self.num_segment -> frame
         all_index = []
         if average_duration > 0:
             all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))

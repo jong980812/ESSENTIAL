@@ -78,7 +78,7 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
 
         dataset = ActivitynetDataset(
             anno_list=anno_list,
-            data_path='/data2/local_datasets/ActivityNet/rawframes',
+            data_path='/local_datasets/Activitynet/videos_256',
             mode=mode,
             clip_len=1,
             num_segment=args.num_frames,
@@ -92,7 +92,8 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
             new_width=320,
             args=args,
             task_id = task_id,
-            rehearsal=rehearsal
+            rehearsal=rehearsal,
+            loader='decord'
             )
     
     else:
@@ -148,6 +149,8 @@ def build_continual_dataloader(args):
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=True,
+            collate_fn=None,
+            
         )
         data_loader_rehearsal = torch.utils.data.DataLoader(
             dataset_rehearsal, sampler=sampler_rehearsal,

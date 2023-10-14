@@ -11,7 +11,6 @@ from scipy.special import softmax
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
 import time,json
 import datetime
-
 from pathlib import Path
 def train_class_batch(model, samples, target, criterion,mask,args,device):
     

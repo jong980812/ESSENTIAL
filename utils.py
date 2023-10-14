@@ -13,7 +13,8 @@ from pathlib import Path
 import subprocess
 import torch
 import torch.distributed as dist
-from torch import inf
+# from torch import inf
+from math import inf
 import random
 import argparse
 
@@ -313,19 +314,20 @@ def init_distributed_mode(args):
         print('Does not support training without GPU.')
         sys.exit(1)
 
+
+    args.distributed = True
+
+    torch.cuda.set_device(args.gpu)
+    print('| distributed init (rank {}): {}'.format(
+        args.rank, args.dist_url), flush=True)
     dist.init_process_group(
         backend="nccl",
         init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank,
     )
-
-    torch.cuda.set_device(args.gpu)
-    print('| distributed init (rank {}): {}'.format(
-        args.rank, args.dist_url), flush=True)
     dist.barrier()
     setup_for_distributed(args.rank == 0)
-    args.distributed = True
 
 
 
