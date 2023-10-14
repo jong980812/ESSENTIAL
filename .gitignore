@@ -1,0 +1,9 @@
+*.out
+.vscode/
+data/
+debug/
+jongseo/
+logs/
+multinode_sh/
+result/
+*.pyc
