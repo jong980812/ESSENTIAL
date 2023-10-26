@@ -191,9 +191,9 @@ def get_args():
                         help='url used to set up distributed training')
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
-    parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
+    parser.add_argument('--unfreeze_layers', default=[], nargs='+', type=str)
     parser.add_argument('--prefix', action='store_true', default=False)
-    parser.add_argument('--prefix_layers', default=None, nargs='+', type=int)
+    parser.add_argument('--prefix_layers', default=[], nargs='+', type=int)
     parser.add_argument('--task', default='cil', choices=['cil', 'joint'],
                         type=str, help='task')
 
