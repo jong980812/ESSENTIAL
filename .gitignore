@@ -6,5 +6,6 @@ jongseo/
 logs/
 multinode_sh/
 result/
+result_joint/
 *.pyc
 *__pycache__
