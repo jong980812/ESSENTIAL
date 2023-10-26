@@ -103,7 +103,7 @@ class CLIP(nn.Module):
                  heads: int, 
                  drop_path_rate=0.2,
                  prefix=False,
-                 prepix_layers: list = [0,1,2,3,4],
+                 prefix_layers: list = [0,1,2,3,4],
                  num_tadapter=1,
                  adapter_scale=0.5,
                  pretrained=None,
@@ -116,7 +116,7 @@ class CLIP(nn.Module):
         self.pretrained = pretrained
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
         self.prefix = prefix
-        self.prefix_layers = prepix_layers
+        self.prefix_layers = prefix_layers
         scale = width ** -0.5
         self.layers = layers
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
