@@ -1,6 +1,7 @@
 *.out
 .vscode/
-data/
+*.pkl
+*.ipynb
 debug/
 jongseo/
 logs/
