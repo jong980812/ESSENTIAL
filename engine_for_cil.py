@@ -11,6 +11,7 @@ from scipy.special import softmax
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
 import time,json
 import datetime
+
 from pathlib import Path
 def train_class_batch(model, samples, target, criterion,mask,args,device):
     
@@ -35,11 +36,9 @@ def train_one_epoch(model: torch.nn.Module,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
                     num_training_steps_per_epoch=None, update_freq=None,header=None
                     ):
-
     model.train(set_training_mode)
     model.zero_grad()
     model.micro_steps = 0
-
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -58,7 +57,6 @@ def train_one_epoch(model: torch.nn.Module,
                     param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
-
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
         mask = None
@@ -207,12 +205,81 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     # create matrix to save end-of-task accuracies 
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
     rehearsal_stats = {}
+    if args.joint_tuning:
+        task_id = args.num_tasks -1 
+        total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
+        num_training_steps_per_epoch = len(data_loader[task_id]['rehearsal'].dataset) // total_batch_size
+        print("Use step level LR scheduler!")
+        lr_schedule_values = utils.cosine_scheduler(
+            args.lr, args.min_lr, args.rehearsal_epochs, num_training_steps_per_epoch,
+            warmup_epochs=args.warmup_epochs, warmup_steps=args.warmup_steps,
+        )
+        if args.weight_decay_end is None:
+            args.weight_decay_end = args.weight_decay
+        wd_schedule_values = utils.cosine_scheduler(
+            args.weight_decay, args.weight_decay_end, args.rehearsal_epochs, num_training_steps_per_epoch)
+        print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
+
+        # optimizer_params = get_parameter_groups(
+        #         model_without_ddp, args.weight_decay, args.skip_weight_decay_list,
+        #         args.assigner.get_layer_id if args.assigner is not None else None,
+        #         args.assigner.get_scale if args.assigner is not None else None)
+        # model, optimizer, _, _ = args.ds_init(
+        #         args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+        #     )      
+        print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
+        for epoch in range(args.rehearsal_epochs): 
+            # ! Debug
+            # if epoch < 44:
+            #     continue
+            if args.distributed:
+                data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
+            header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'
+            rehearsal_stats = train_one_epoch(model=model, criterion=criterion, 
+                                        data_loader=data_loader[task_id]['rehearsal'], optimizer=optimizer, 
+                                        device=device, epoch=epoch, max_norm=args.clip_grad, 
+                                        set_training_mode=True, task_id=task_id, class_mask=None, args=args,
+                                        start_steps=epoch * num_training_steps_per_epoch,
+                                        lr_schedule_values=lr_schedule_values, 
+                                        wd_schedule_values=wd_schedule_values,
+                                        num_training_steps_per_epoch=num_training_steps_per_epoch, 
+                                        update_freq=args.update_freq, header=header
+                                        )
+            val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+                                        task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
+        if args.output_dir and utils.is_main_process():
+            Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
+            
+            checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
+            state_dict = {
+                    'model': model_without_ddp.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'epoch': epoch,
+                    'args': args,
+                }
+
+            utils.save_on_master(state_dict, checkpoint_path)
+
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+            **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
+            **{f'val_{k}': v for k, v in val_stats.items()},
+            'epoch': epoch,}
+        print(log_stats)
+        if args.output_dir and utils.is_main_process():
+            with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
+                f.write(json.dumps(log_stats) + '\n')
+        print('test')
+        test_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
+
+        log_stats = {**{f'test_{k}': v for k, v in test_stats.items()}}
+        print(log_stats)
+        return   
     for task_id in range(args.num_tasks):
-        # ! Debug
-        if task_id < 3:
-            continue
+        # # ! Debug
+        # if task_id < 3:
+        #     continue
         print(f'task {task_id+1}/{args.num_tasks}')
-        
        # lr scehdule
         total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
         num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
@@ -245,8 +312,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
             )        
         for epoch in range(args.epochs): 
-            # ! Debug
-            continue
+            # # ! Debug
+            # continue
             if args.distributed:
                 data_loader[task_id]['train'].sampler.set_epoch(epoch)   
             header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'
@@ -263,7 +330,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         if args.memory_size > 0:
                    # lr scehdule
             total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
-            num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
+            num_training_steps_per_epoch = len(data_loader[task_id]['rehersal'].dataset) // total_batch_size
             print("Use step level LR scheduler!")
             lr_schedule_values = utils.cosine_scheduler(
                 args.lr, args.min_lr, args.rehearsal_epochs, num_training_steps_per_epoch,
@@ -279,6 +346,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
             
             for epoch in range(args.rehearsal_epochs): 
+                # ! Debug
+                # if epoch < 44:
+                #     continue
                 if args.distributed:
                     data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
                 header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'

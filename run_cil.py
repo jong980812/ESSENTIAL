@@ -20,14 +20,15 @@ from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.utils import ModelEma
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
 
-from datasets import build_continual_dataloader
-from engine_for_cil import train_and_evaluate
+from dataset.datasets import build_dataloader
 from utils import NativeScalerWithGradNormCount as NativeScaler
 from utils import  multiple_samples_collate
-from utils import  get_args_cil
+from utils import  get_args_cil, unfreeze_block
 import utils
-from modeling_cil import ViT_CLIP
-import modeling_finetune
+from model.AIM import AIM
+from model.CLIP import CLIP
+
+
 import random
 def get_args_cil():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
@@ -61,7 +62,7 @@ def get_args_cil():
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--attn_drop_rate', type=float, default=0.0, metavar='PCT',
                         help='Attention dropout rate (default: 0.)')
-    parser.add_argument('--drop_path', type=float, default=0.1, metavar='PCT',
+    parser.add_argument('--drop_path', type=float, default=0.2, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
 
     parser.add_argument('--disable_eval_during_finetuning', action='store_true', default=False)
@@ -207,7 +208,15 @@ def get_args_cil():
                         help='url used to set up distributed training')
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
-
+    
+    
+    parser.add_argument('--joint_tuning', action='store_true', default=False)
+    parser.add_argument('--prefix', action='store_true', default=False)
+    parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
+    parser.add_argument('--prefix_layers', default=None, nargs='+', type=int)
+    parser.add_argument('--task', default='cil', choices=['cil', 'joint'],
+                        type=str, help='task')
+    
     known_args, _ = parser.parse_known_args()
 
     if known_args.enable_deepspeed:
@@ -267,23 +276,37 @@ def main(args, ds_init):
 
 
 
-    if args.model == 'clip':
-        model = ViT_CLIP(
+    if args.model == 'AIM':
+        model = AIM(
             input_resolution=224,
             patch_size=16,
             num_frames=args.num_frames,
             width=768,
             layers=12,
             heads=12,
-            drop_path_rate=0.2,
+            drop_path_rate=args.drop_path,
             adapter_scale=0.5,
             num_classes=args.nb_classes
         )
         num_layers = model.layers
+    elif args.model == 'CLIP':
+        model = CLIP(
+            input_resolution=224,
+            prefix=args.prefix,
+            prepix_layers=args.prefix_layers,
+            patch_size=16,
+            num_frames=args.num_frames,
+            width=768,
+            layers=12,
+            heads=12,
+            drop_path_rate=args.drop_path,
+            num_classes=args.nb_classes
+        )
+        num_layers = model.layers
+        # for name, param in model.named_parameters():
+        #     if 'temporal_embedding' not in name and 'ln_post' not in name and 'head' not in name and 'Adapter' not in name and 'prefix' not in name:
+        #         param.requires_grad = False
         
-        for name, param in model.named_parameters():
-            if 'temporal_embedding' not in name and 'ln_post' not in name and 'head' not in name and 'Adapter' not in name:
-                param.requires_grad = False
     else:
         model = create_model(
         args.model,
@@ -369,7 +392,9 @@ def main(args, ds_init):
 
     print("Model = %s" % str(model_without_ddp))
 
-
+    if args.unfreeze_layers is not None:
+        model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+        print('unfreeze list :', unfreeze_list)
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -432,8 +457,12 @@ def main(args, ds_init):
     print("criterion = %s" % str(criterion))
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    data_loader, class_mask = build_continual_dataloader(args)
+    data_loader, class_mask = build_dataloader(args)
 
+    if args.task == 'cil':
+        from engine_for_cil import train_and_evaluate
+    elif args.task == 'joint':
+        pass
 
     train_and_evaluate(model, model_without_ddp,
                     criterion, data_loader, optimizer,

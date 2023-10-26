@@ -325,6 +325,7 @@ def init_distributed_mode(args):
         init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank,
+        timeout=datetime.timedelta(seconds=200000)
     )
     dist.barrier()
     setup_for_distributed(args.rank == 0)
@@ -590,7 +591,17 @@ def multiple_samples_collate(batch, fold=False):
     else:
         return inputs, labels, video_idx, extra_data
 
-
+def unfreeze_block(model, block_list):
+    unfreeze_list = []
+    for name, param in model.named_parameters():
+        for block in block_list:#if block in block_list
+            if block in name:
+                param.requires_grad = True
+                unfreeze_list.append(name)
+                break
+            else:
+                param.requires_grad = False
+    return model, unfreeze_list
 
 
 

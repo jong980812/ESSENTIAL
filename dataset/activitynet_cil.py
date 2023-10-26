@@ -191,7 +191,9 @@ class ActivitynetDataset(Dataset):
                 end_ratio = 1.0
 
             video_name = video_info['filename']
-
+            
+            
+            
             buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
