@@ -1,3 +1,0 @@
-{'t_start': '0.01', 't_end': '178.76654914196567', 'video_duration': '191.6', 'filename': 'v_mPtCJg-j4SM', 'fps': '30.0', 'video_frames': '5748'}
-
-'/data2/local_datasets/ActivityNet/videos/v_mPtCJg-j4SM.mp4'

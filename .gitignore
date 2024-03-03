@@ -1,12 +1,16 @@
+# ext
 *.out
-.vscode/
 *.pkl
 *.ipynb
-debug/
-jongseo/
-logs/
-multinode_sh/
-result/
-result_joint/
 *.pyc
 *__pycache__
+*.pth
+
+#cache
+.vscode/
+
+# log
+debug/
+logs/
+multinode_sh/
+**/result*/

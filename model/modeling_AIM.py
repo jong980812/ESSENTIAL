@@ -10,10 +10,10 @@ from einops import rearrange
 
 
 class Adapter(nn.Module):
-    def __init__(self, D_features, mlp_ratio=0.25, act_layer=nn.GELU, skip_connect=True):
+    def __init__(self, D_features, dim_mlp=192, act_layer=nn.GELU, skip_connect=True):
         super().__init__()
         self.skip_connect = skip_connect
-        D_hidden_features = int(D_features * mlp_ratio)
+        D_hidden_features = int(dim_mlp)
         self.act = act_layer()
         self.D_fc1 = nn.Linear(D_features, D_hidden_features)
         self.D_fc2 = nn.Linear(D_hidden_features, D_features)
@@ -44,7 +44,7 @@ class QuickGELU(nn.Module):
 
 
 class ResidualAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
         super().__init__()
         self.num_tadapter = num_tadapter
         self.attn = nn.MultiheadAttention(d_model, n_head)
@@ -57,13 +57,13 @@ class ResidualAttentionBlock(nn.Module):
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
         self.n_head = n_head
-
-        self.MLP_Adapter = Adapter(d_model, skip_connect=False)
-        self.S_Adapter = Adapter(d_model)
+        self.dim_mlp = dim_mlp
+        self.MLP_Adapter = Adapter(d_model, dim_mlp=self.dim_mlp,skip_connect=False)
+        self.S_Adapter = Adapter(d_model,dim_mlp=self.dim_mlp)
         self.scale = scale
-        self.T_Adapter = Adapter(d_model, skip_connect=False)
+        self.T_Adapter = Adapter(d_model, skip_connect=False,dim_mlp=self.dim_mlp)
         if num_tadapter == 2:
-            self.T_Adapter_in = Adapter(d_model)
+            self.T_Adapter_in = Adapter(d_model,dim_mlp=dim_mlp)
         self.num_frames = num_frames
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
@@ -91,19 +91,27 @@ class ResidualAttentionBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1):
+    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,dim_mlp=192):
         super().__init__()
         self.width = width
         self.layers = layers
         dpr = [x.item() for x in torch.linspace(0, drop_path, self.layers)]
-        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i]) for i in range(layers)])
+        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp) for i in range(layers)])
 
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
+    def initial_adapter(self):
+        for n, m in self.resblocks.named_modules():
+            if 'Adapter' in n:
+                for n2, m2 in m.named_modules():
+                    if 'D_fc2' in n2:
+                        if isinstance(m2, nn.Linear):
+                            nn.init.constant_(m2.weight, 0)
+                            nn.init.constant_(m2.bias, 0)
 
 class AIM(nn.Module):
     ## ViT definition in CLIP image encoder
-    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2):
+    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192):
         super().__init__()
         self.input_resolution = input_resolution
         self.pretrained = pretrained
@@ -118,7 +126,7 @@ class AIM(nn.Module):
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
 
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate)
+        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp)
 
         self.ln_post = LayerNorm(width)
 

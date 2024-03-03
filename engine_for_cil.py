@@ -11,34 +11,178 @@ from scipy.special import softmax
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
 import time,json
 import datetime
-
+from utils import NativeScalerWithGradNormCount as NativeScaler
 from pathlib import Path
-def train_class_batch(model, samples, target, criterion,mask,args,device):
+from utils import print_matrix_with_aligned_averages
+
+
+def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, 
+                    criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device, 
+                    class_mask=None, args = None,loss_scaler=None):
+
+
+    train_stats = {}
+    # create matrix to save end-of-task accuracies 
+    acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
+    rehearsal_stats = {}
+    acc_list = []
+    for task_id in range(args.num_tasks):
+        # SSv2 초반 epoch을 위해 만들어놓았지만, 현재 사용 안함.
+        if task_id == 0 and args.data_set == "SSV2":
+            warmup_epochs,epochs = args.warmup_epochs,args.epochs
+        else:
+            warmup_epochs,epochs = args.warmup_epochs,args.epochs
+            
+        print(f'task {task_id+1}/{args.num_tasks}')
+        start_time = time.time()
+        
+       # lr scehdule
+        total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
+        num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
+        print("Use step level LR scheduler!")
+        lr_schedule_values = utils.cosine_scheduler(
+            args.lr, args.min_lr, epochs, num_training_steps_per_epoch,
+            warmup_epochs=warmup_epochs, warmup_steps=args.warmup_steps,
+        )
+        if args.weight_decay_end is None:
+            args.weight_decay_end = args.weight_decay
+        wd_schedule_values = utils.cosine_scheduler(
+            args.weight_decay, args.weight_decay_end, epochs, num_training_steps_per_epoch)
+        print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
+
+
+        print(f"Start task training for {epochs} epochs")
+        #TODO pick best model using validation
+        max_accuracy = 0.0
+
+        if not args.joint:
+            if task_id > 0:
+                # reinit_optimizer
+                if loss_scaler is None:
+                    optimizer_params = get_parameter_groups(
+                        model_without_ddp, args.weight_decay, args.skip_weight_decay_list,
+                        args.assigner.get_layer_id if args.assigner is not None else None,
+                        args.assigner.get_scale if args.assigner is not None else None)
+                    model, optimizer, _, _ = args.ds_init(
+                        args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+                    ) 
+                else:
+
+                    #! Adapter 에서 0번 태스크 이후 작동하는 함수들 따로 지정.
+                    if args.model == 'AIM_adapter_v2':
+                        model.module.freeze()                  
+                        model.module.transformer.add_adapters(mode=args.mode)
+                        model.module.transformer.del_adapters()
+                        model.to(args.device)
+                        model_without_ddp = model.module
+                    elif args.model == 'AIM_adapter':
+                        model.module.transformer.freeze_adapters()                
+                        model.module.transformer.add_adapters(mode=args.mode)
+                        model.module.transformer.del_adapters()
+                        model.to(args.device)
+                        model_without_ddp = model.module
+                    optimizer = create_optimizer(
+                    args, model_without_ddp, skip_list=args.skip_weight_decay_list,
+                    get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
+                    get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
+                    loss_scaler = NativeScaler()
+         
+        n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f'*******Task{task_id+1} params: {n_parameters}*******')
+        # if task_id == 0:
+        #     continue
+
+        #!************************ Rehearsal *************************************
+        if args.memory_size > 0:
+                   # lr scehdule
+            total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
+            num_training_steps_per_epoch = len(data_loader[task_id]['rehearsal'].dataset) // total_batch_size
+            print("Use step level LR scheduler!")
+            lr_schedule_values = utils.cosine_scheduler(
+                args.lr, args.min_lr, args.rehearsal_epochs, num_training_steps_per_epoch,
+                warmup_epochs=warmup_epochs, warmup_steps=args.warmup_steps,
+            )
+            if args.weight_decay_end is None:
+                args.weight_decay_end = args.weight_decay
+            wd_schedule_values = utils.cosine_scheduler(
+                args.weight_decay, args.weight_decay_end, args.rehearsal_epochs, num_training_steps_per_epoch)
+            print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
+
+
+            print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
+            
+            for epoch in range(args.rehearsal_epochs): 
+                if args.distributed:
+                    data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
+                header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'
+                rehearsal_stats = train_one_epoch(model=model, criterion=criterion, 
+                                            data_loader=data_loader[task_id]['rehearsal'], optimizer=optimizer, 
+                                            device=device, epoch=epoch, max_norm=args.clip_grad, 
+                                            set_training_mode=True, task_id=task_id, class_mask=None, args=args,
+                                            start_steps=epoch * num_training_steps_per_epoch,
+                                            lr_schedule_values=lr_schedule_values, 
+                                            wd_schedule_values=wd_schedule_values,
+                                            num_training_steps_per_epoch=num_training_steps_per_epoch, 
+                                            update_freq=args.update_freq, header=header,loss_scaler=loss_scaler
+                                            )
+                
     
+        val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
+        acc_list.append(val_stats['stat_matrix'].tolist())
+        del val_stats['stat_matrix']
+        if args.output_dir and utils.is_main_process():
+            Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
+            
+            checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
+            state_dict = {
+                    'model': model_without_ddp.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'epoch': epoch,
+                    'args': args,
+                }
 
-    outputs = model(samples)
-    if mask is not None:
-        not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
-        not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
-        outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
-    loss = criterion(outputs, target)
-    return loss, outputs
+            utils.save_on_master(state_dict, checkpoint_path)
+    
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+            **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
+            **{f'val_{k}': v for k, v in val_stats.items()},
+            'epoch': epoch,}
+        print(log_stats)
+        if args.output_dir and utils.is_main_process():
+            with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
+                f.write(json.dumps(log_stats) + '\n')
 
+        total_time = time.time() - start_time
+        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+        print('Training time {}'.format(total_time_str))
+    if args.data_set!='SSV2':
+        print('test')
+        evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
+    else:
+        #! SSV2 는 필요함.
+        if utils.is_main_process():
+            print('Average Incremental Accuracy (VAL)')
+            print_matrix_with_aligned_averages(acc_list,args.n_videos)
 
-def get_loss_scale_for_deepspeed(model):
-    optimizer = model.optimizer
-    return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
-
+    torch.distributed.barrier()
+    
 def train_one_epoch(model: torch.nn.Module,  
                     criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0,
                     set_training_mode=True, task_id=-1, class_mask=None, args = None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None,header=None
+                    num_training_steps_per_epoch=None, update_freq=None,header=None,loss_scaler=None
                     ):
+
     model.train(set_training_mode)
-    model.zero_grad()
-    model.micro_steps = 0
+    if loss_scaler is None:
+        model.zero_grad()
+        model.micro_steps = 0
+    else:
+        optimizer.zero_grad()
+
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -62,29 +206,51 @@ def train_one_epoch(model: torch.nn.Module,
         mask = None
         if class_mask is not None:
             mask = class_mask[task_id]
-
-        samples = samples.half()
-        loss, output = train_class_batch(
+       
+        if args.mixup_fn is not None:
+            samples, targets = args.mixup_fn(samples, targets)
+            
+        if loss_scaler is None:
+            samples = samples.half()
+            loss, output = train_class_batch(
             model, samples, targets, criterion,mask,args,device)
+        else:
+            with torch.cuda.amp.autocast():
+                loss, output = train_class_batch(
+                model, samples, targets, criterion,mask,args,device)
 
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
+        if loss_scaler is None:
+            loss /= update_freq
+            model.backward(loss)
+            model.step()
+            grad_norm = None
+            loss_scale_value = get_loss_scale_for_deepspeed(model)
+        
+        else:
+            # this attribute is added by timm on one optimizer (adahessian)
+            is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+            loss /= update_freq
+            grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
+                                    parameters=model.parameters(), create_graph=is_second_order,
+                                    update_grad=(data_iter_step + 1) % update_freq == 0)
+            if (data_iter_step + 1) % update_freq == 0:
+                optimizer.zero_grad()
 
-        loss /= update_freq
-        model.backward(loss)
-        model.step()
+            loss_scale_value = loss_scaler.state_dict()["scale"]
 
-
-        grad_norm = None
-        loss_scale_value = get_loss_scale_for_deepspeed(model)
-    
         torch.cuda.synchronize()
 
-        class_acc = (output.max(-1)[-1] == targets).float().mean()
-
+        if args.mixup_fn is None:
+            class_acc = (output.max(-1)[-1] == targets).float().mean()
+        else:
+            class_acc = None
+            
+            
         metric_logger.update(loss=loss_value)
         metric_logger.update(class_acc=class_acc)
         metric_logger.update(loss_scale=loss_scale_value)
@@ -110,7 +276,25 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
+def train_class_batch(model, samples, target, criterion,mask,args,device):
+    
 
+    outputs = model(samples)
+    if mask is not None:
+        not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
+        not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
+        outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
+        
+        # TODO mixup
+        # outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-1e4'))
+        # target = target.index_fill(dim=1, index=not_mask, value=int(0))
+    loss = criterion(outputs, target)
+    return loss, outputs
+
+
+def get_loss_scale_for_deepspeed(model):
+    optimizer = model.optimizer
+    return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
 
 
 
@@ -180,6 +364,7 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
     diagonal = np.diag(acc_matrix)
 
     result_str = "[Average accuracy till task{}]\tAcc@1: {:.4f}\tAcc@5: {:.4f}\tLoss: {:.4f}".format(task_id+1, avg_stat[0], avg_stat[1], avg_stat[2])
+    test_stats['stat_matrix'] = stat_matrix[0]
     if task_id > 0:
         forgetting = np.mean((np.max(acc_matrix, axis=1) -
                             acc_matrix[:, task_id])[:task_id])
@@ -190,212 +375,7 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
 
     return test_stats
 
-
-
-
-
-
-
-def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, 
-                    criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device, 
-                    class_mask=None, args = None,):
-
-
-    train_stats = {}
-    # create matrix to save end-of-task accuracies 
-    acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
-    rehearsal_stats = {}
-    if args.joint_tuning:
-        task_id = args.num_tasks -1 
-        total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
-        num_training_steps_per_epoch = len(data_loader[task_id]['rehearsal'].dataset) // total_batch_size
-        print("Use step level LR scheduler!")
-        lr_schedule_values = utils.cosine_scheduler(
-            args.lr, args.min_lr, args.rehearsal_epochs, num_training_steps_per_epoch,
-            warmup_epochs=args.warmup_epochs, warmup_steps=args.warmup_steps,
-        )
-        if args.weight_decay_end is None:
-            args.weight_decay_end = args.weight_decay
-        wd_schedule_values = utils.cosine_scheduler(
-            args.weight_decay, args.weight_decay_end, args.rehearsal_epochs, num_training_steps_per_epoch)
-        print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
-
-        # optimizer_params = get_parameter_groups(
-        #         model_without_ddp, args.weight_decay, args.skip_weight_decay_list,
-        #         args.assigner.get_layer_id if args.assigner is not None else None,
-        #         args.assigner.get_scale if args.assigner is not None else None)
-        # model, optimizer, _, _ = args.ds_init(
-        #         args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
-        #     )      
-        print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
-        for epoch in range(args.rehearsal_epochs): 
-            # ! Debug
-            # if epoch < 44:
-            #     continue
-            if args.distributed:
-                data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
-            header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'
-            rehearsal_stats = train_one_epoch(model=model, criterion=criterion, 
-                                        data_loader=data_loader[task_id]['rehearsal'], optimizer=optimizer, 
-                                        device=device, epoch=epoch, max_norm=args.clip_grad, 
-                                        set_training_mode=True, task_id=task_id, class_mask=None, args=args,
-                                        start_steps=epoch * num_training_steps_per_epoch,
-                                        lr_schedule_values=lr_schedule_values, 
-                                        wd_schedule_values=wd_schedule_values,
-                                        num_training_steps_per_epoch=num_training_steps_per_epoch, 
-                                        update_freq=args.update_freq, header=header
-                                        )
-            val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-                                        task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
-        if args.output_dir and utils.is_main_process():
-            Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
-            
-            checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
-            state_dict = {
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'epoch': epoch,
-                    'args': args,
-                }
-
-            utils.save_on_master(state_dict, checkpoint_path)
-
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-            **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
-            **{f'val_{k}': v for k, v in val_stats.items()},
-            'epoch': epoch,}
-        print(log_stats)
-        if args.output_dir and utils.is_main_process():
-            with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
-                f.write(json.dumps(log_stats) + '\n')
-        print('test')
-        test_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
-
-        log_stats = {**{f'test_{k}': v for k, v in test_stats.items()}}
-        print(log_stats)
-        return   
-    for task_id in range(args.num_tasks):
-        # # ! Debug
-        # if task_id < 3:
-        #     continue
-        print(f'task {task_id+1}/{args.num_tasks}')
-       # lr scehdule
-        total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
-        num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
-        print("Use step level LR scheduler!")
-        lr_schedule_values = utils.cosine_scheduler(
-            args.lr, args.min_lr, args.epochs, num_training_steps_per_epoch,
-            warmup_epochs=args.warmup_epochs, warmup_steps=args.warmup_steps,
-        )
-        if args.weight_decay_end is None:
-            args.weight_decay_end = args.weight_decay
-        wd_schedule_values = utils.cosine_scheduler(
-            args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
-        print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
-
-
-        print(f"Start task training for {args.epochs} epochs")
-        start_time = time.time()
-        #TODO pick best model using validation
-        max_accuracy = 0.0
-
-
-        if task_id > 0:
-            # reinit_optimizer
-            loss_scaler = None
-            optimizer_params = get_parameter_groups(
-                model_without_ddp, args.weight_decay, args.skip_weight_decay_list,
-                args.assigner.get_layer_id if args.assigner is not None else None,
-                args.assigner.get_scale if args.assigner is not None else None)
-            model, optimizer, _, _ = args.ds_init(
-                args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
-            )        
-        for epoch in range(args.epochs): 
-            # # ! Debug
-            # continue
-            if args.distributed:
-                data_loader[task_id]['train'].sampler.set_epoch(epoch)   
-            header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {args.epochs}]'
-            train_stats = train_one_epoch(model=model, criterion=criterion, 
-                                        data_loader=data_loader[task_id]['train'], optimizer=optimizer, 
-                                        device=device, epoch=epoch, max_norm=args.clip_grad, 
-                                        set_training_mode=True, task_id=task_id, class_mask=class_mask, args=args,
-                                        start_steps=epoch * num_training_steps_per_epoch,
-                                        lr_schedule_values=lr_schedule_values, 
-                                        wd_schedule_values=wd_schedule_values,
-                                        num_training_steps_per_epoch=num_training_steps_per_epoch, 
-                                        update_freq=args.update_freq, header= header
-                                        )
-        if args.memory_size > 0:
-                   # lr scehdule
-            total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
-            num_training_steps_per_epoch = len(data_loader[task_id]['rehersal'].dataset) // total_batch_size
-            print("Use step level LR scheduler!")
-            lr_schedule_values = utils.cosine_scheduler(
-                args.lr, args.min_lr, args.rehearsal_epochs, num_training_steps_per_epoch,
-                warmup_epochs=args.warmup_epochs, warmup_steps=args.warmup_steps,
-            )
-            if args.weight_decay_end is None:
-                args.weight_decay_end = args.weight_decay
-            wd_schedule_values = utils.cosine_scheduler(
-                args.weight_decay, args.weight_decay_end, args.rehearsal_epochs, num_training_steps_per_epoch)
-            print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
-
-
-            print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
-            
-            for epoch in range(args.rehearsal_epochs): 
-                # ! Debug
-                # if epoch < 44:
-                #     continue
-                if args.distributed:
-                    data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
-                header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'
-                rehearsal_stats = train_one_epoch(model=model, criterion=criterion, 
-                                            data_loader=data_loader[task_id]['rehearsal'], optimizer=optimizer, 
-                                            device=device, epoch=epoch, max_norm=args.clip_grad, 
-                                            set_training_mode=True, task_id=task_id, class_mask=None, args=args,
-                                            start_steps=epoch * num_training_steps_per_epoch,
-                                            lr_schedule_values=lr_schedule_values, 
-                                            wd_schedule_values=wd_schedule_values,
-                                            num_training_steps_per_epoch=num_training_steps_per_epoch, 
-                                            update_freq=args.update_freq, header=header
-                                            )
-        val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
-        if args.output_dir and utils.is_main_process():
-            Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
-            
-            checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
-            state_dict = {
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'epoch': epoch,
-                    'args': args,
-                }
-
-            utils.save_on_master(state_dict, checkpoint_path)
-
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-            **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
-            **{f'val_{k}': v for k, v in val_stats.items()},
-            'epoch': epoch,}
-        print(log_stats)
-        if args.output_dir and utils.is_main_process():
-            with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
-                f.write(json.dumps(log_stats) + '\n')
-
-        total_time = time.time() - start_time
-        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print('Training time {}'.format(total_time_str))
-
-    print('test')
-    test_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-                                task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
-
-    log_stats = {**{f'test_{k}': v for k, v in test_stats.items()}}
-    print(log_stats)
+    
 
 
 @torch.no_grad()

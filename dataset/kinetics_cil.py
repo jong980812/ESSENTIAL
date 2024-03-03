@@ -2,7 +2,7 @@ import os
 import numpy as np
 from numpy.lib.function_base import disp
 import torch
-import decord
+import decord, random
 from PIL import Image
 from torchvision import transforms
 from random_erasing import RandomErasing
@@ -11,15 +11,29 @@ from decord import VideoReader, cpu
 from torch.utils.data import Dataset
 import video_transforms as video_transforms 
 import volume_transforms as volume_transforms
+import utils, json
+import torch.distributed as dist
 
-class VideoClsDataset(Dataset):
+def write_to_file(data, filename):
+    with open(filename, "w") as f:
+        for item in data:
+            f.write("%s\n" % item)
+            
+def read_from_file(filename):
+    with open(filename, "r") as f:
+        return [line.strip() for line in f.readlines()]
+
+
+class KineticsDataset(Dataset):
     """Load your own video classification dataset."""
 
-    def __init__(self, anno_path, data_path, mode='train', clip_len=8,
+    def __init__(self, anno_list, data_path, mode='train', clip_len=8,
                  frame_sample_rate=2, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None):
-        self.anno_path = anno_path
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,
+                 loader='decord',rehearsal=False,return_text=False
+                 ):
+        self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
         self.clip_len = clip_len
@@ -36,17 +50,71 @@ class VideoClsDataset(Dataset):
         self.args = args
         self.aug = False
         self.rand_erase = False
+        self.return_text=False
+        if loader == 'decord':
+            self.loader = self.loadvideo_decord
+        elif loader =='pyav':
+            self.loader = self.loadvideo_pyav
+        elif loader =='frame':
+            self.loader = self.load_frames
+        
+        
+        
         if self.mode in ['train']:
             self.aug = True
             if self.args.reprob > 0:
                 self.rand_erase = True
         if VideoReader is None:
             raise ImportError("Unable to import `decord` which is required to read videos.")
+        self.label_array = []
+        self.dataset_samples = []
+        self.label_name_array = []
+        if not rehearsal:
+            for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
+                for video_info in videos:
+                    if task_id == 0:
+                        self.label_array.append(label_num )
+                    else:
+                        self.label_array.append(label_num + args.classes_per_task[task_id-1])
+                    self.dataset_samples.append(video_info)
+                    self.label_name_array.append(label_name)
 
-        import pandas as pd
-        cleaned = pd.read_csv(self.anno_path, header=None, delimiter=',')
-        self.dataset_samples = list(cleaned.values[:, 0])
-        self.label_array = list(cleaned.values[:, 1])
+        else:
+            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+                args.memory_video_path = json.load(file)
+            self.label_array = args.memory_video_path['label_array']
+            self.dataset_samples = args.memory_video_path['dataset_samples']
+            self.mode ='train'
+
+
+
+        if utils.is_main_process() and mode == 'train' and  args.memory_size>0 and not rehearsal:
+            # save video in rehearsal
+            if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
+                args.memory_video_path['dataset_samples'] += self.dataset_samples
+                args.memory_video_path['label_array'] += self.label_array
+            else:
+                need_size = int(args.memory_size / (task_id + 1))
+                m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
+                indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
+
+                selected_indices = random.sample(range(len(self.label_array)), need_size)
+                selected_labels = [self.label_array[i] for i in selected_indices]
+                selected_samples = [self.dataset_samples[i] for i in selected_indices]
+                label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
+                dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
+
+                args.memory_video_path['dataset_samples'] = dataset_samples
+                args.memory_video_path['label_array'] = label_array
+            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
+                json.dump(args.memory_video_path, file)
+
+        assert len(args.memory_video_path['label_array']) <= args.memory_size
+
+
+
+
+
 
         if (mode == 'train'):
             pass
@@ -221,7 +289,8 @@ class VideoClsDataset(Dataset):
 
     def loadvideo_decord(self, sample, sample_rate_scale=1):
         """Load video content using Decord"""
-        fname = sample
+        fname = os.path.join(self.data_path,sample)
+
 
         if not (os.path.exists(fname)):
             return []
@@ -247,9 +316,9 @@ class VideoClsDataset(Dataset):
             vr.seek(0)
             buffer = vr.get_batch(all_index).asnumpy()
             return buffer
-        #! vr에 영상 다읽어서 frame 넣어놓음. 대부분 250frame
+
         # handle temporal segments
-        converted_len = int(self.clip_len * self.frame_sample_rate)#64
+        converted_len = int(self.clip_len * self.frame_sample_rate)
         seg_len = len(vr) // self.num_segment
 
         all_index = []
@@ -506,7 +575,8 @@ class VideoMAE(torch.utils.data.Dataset):
                 # line format: video_path, video_duration, video_label
                 if len(line_info) < 2:
                     raise(RuntimeError('Video input format is not correct, missing one or more element. %s' % line))
-                clip_path = os.path.join(line_info[0])
+                # hard coding for kinetics path
+                clip_path = os.path.join("/local_datasets/kinetics400",line_info[0])
                 target = int(line_info[1])
                 item = (clip_path, target)
                 clips.append(item)

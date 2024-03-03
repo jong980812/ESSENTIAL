@@ -20,13 +20,16 @@ from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.utils import ModelEma
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
 
-from dataset.datasets import build_dataloader
+from dataset.datasets_cil import build_continual_dataloader
 from utils import NativeScalerWithGradNormCount as NativeScaler
 from utils import  multiple_samples_collate
-from utils import  get_args_cil, unfreeze_block
+from utils import  get_args_cil
+from utils import unfreeze_block
 import utils
-from model.AIM import AIM
-from model.CLIP import CLIP
+from engine_for_cil import train_and_evaluate
+
+from model.modeling_AIM import AIM
+from model.modeling_CLIP import CLIP
 
 
 import random
@@ -38,16 +41,6 @@ def get_args_cil():
     parser.add_argument('--save_ckpt_freq', default=100, type=int)
     parser.add_argument('--val_freq', default=5, type=int)
 
-
-    # CIL parameters
-    parser.add_argument('--num_tasks', default=10, type=int,
-                        help='all_task number')
-    parser.add_argument('--memory_size', default=2000, type=int,help='instance number')
-    parser.add_argument('--memory_video_path', default={'dataset_samples':[],
-                                                        'label_array':[]}, type=dict,help='instance number')
-    parser.add_argument('--rehearsal_epochs', default=50, type=int)
-
-                        
     # Model parameters
     parser.add_argument('--model', default='vit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
@@ -62,13 +55,9 @@ def get_args_cil():
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--attn_drop_rate', type=float, default=0.0, metavar='PCT',
                         help='Attention dropout rate (default: 0.)')
-    parser.add_argument('--drop_path', type=float, default=0.2, metavar='PCT',
+    parser.add_argument('--drop_path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
 
-    parser.add_argument('--disable_eval_during_finetuning', action='store_true', default=False)
-    parser.add_argument('--model_ema', action='store_true', default=False)
-    parser.add_argument('--model_ema_decay', type=float, default=0.9999, help='')
-    parser.add_argument('--model_ema_force_cpu', action='store_true', default=False, help='')
 
     # Optimizer parameters
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
@@ -117,8 +106,8 @@ def get_args_cil():
     # Evaluation parameters
     parser.add_argument('--crop_pct', type=float, default=None)
     parser.add_argument('--short_side_size', type=int, default=224)
-    parser.add_argument('--test_num_segment', type=int, default=5)
-    parser.add_argument('--test_num_crop', type=int, default=3)
+    parser.add_argument('--test_num_segment', type=int, default=1)
+    parser.add_argument('--test_num_crop', type=int, default=1)
     
     # Random Erase params
     parser.add_argument('--reprob', type=float, default=0.25, metavar='PCT',
@@ -131,15 +120,15 @@ def get_args_cil():
                         help='Do not random erase first (clean) augmentation split')
 
     # Mixup params
-    parser.add_argument('--mixup', type=float, default=0.8,
+    parser.add_argument('--mixup', type=float, default=0.0,
                         help='mixup alpha, mixup enabled if > 0.')
-    parser.add_argument('--cutmix', type=float, default=1.0,
+    parser.add_argument('--cutmix', type=float, default=0.,
                         help='cutmix alpha, cutmix enabled if > 0.')
     parser.add_argument('--cutmix_minmax', type=float, nargs='+', default=None,
                         help='cutmix min/max ratio, overrides alpha and enables cutmix if set (default: None)')
-    parser.add_argument('--mixup_prob', type=float, default=1.0,
+    parser.add_argument('--mixup_prob', type=float, default=0.0,
                         help='Probability of performing mixup or cutmix when either/both is enabled')
-    parser.add_argument('--mixup_switch_prob', type=float, default=0.5,
+    parser.add_argument('--mixup_switch_prob', type=float, default=0.0,
                         help='Probability of switching to cutmix when both mixup and cutmix enabled')
     parser.add_argument('--mixup_mode', type=str, default='batch',
                         help='How to apply mixup/cutmix params. Per "batch", "pair", or "elem"')
@@ -168,7 +157,7 @@ def get_args_cil():
     parser.add_argument('--num_segments', type=int, default= 1)
     parser.add_argument('--num_frames', type=int, default= 16)
     parser.add_argument('--sampling_rate', type=int, default= 4)
-    parser.add_argument('--data_set', default='ActivityNet', choices=['Kinetics-400', 'ActivityNet_cil','ActivityNet_joint','UCF101'],
+    parser.add_argument('--data_set', default='ActivityNet', choices=['Kinetics-400', 'ActivityNet', 'SSV2','UCF101'],
                         type=str, help='dataset')
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
@@ -202,33 +191,51 @@ def get_args_cil():
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
-    parser.add_argument('--local_rank', default=-1, type=int)
+    parser.add_argument('--local-rank', default=-1, type=int)
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
+
+    #! Our Argument는 여기다가
+    
+    parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
+    
+    #********** CIL parameters*****************
+    parser.add_argument('--num_tasks', default=10, type=int,
+                        help='all_task number')
+    parser.add_argument('--memory_size', default=2000, type=int,help='instance number')
+    parser.add_argument('--memory_video_path', default={'dataset_samples':[],
+                                                        'label_array':[]}, type=dict,help='instance number')
+    parser.add_argument('--rehearsal_epochs', default=50, type=int)
+    parser.add_argument('--prefix', type=int, default=0)
+    parser.add_argument('--postfix', type=int, default=0)
+    parser.add_argument('--pretrain', default=None, type=str)
+    
+    #************* EMA*******************
+    parser.add_argument('--disable_eval_during_finetuning', action='store_true', default=False)
+    parser.add_argument('--model_ema', action='store_true', default=False)
+    parser.add_argument('--model_ema_decay', type=float, default=0.9999, help='')
+    parser.add_argument('--model_ema_force_cpu', action='store_true', default=False, help='')
+    
+    #************ Prompt ******************
+    parser.add_argument('--input_prompt_type', type=str, default=None, help='adapter prompt dimension')
+    parser.add_argument('--input_prompt_len', type=int, default=10, help='adapter prompt dimension')
+    
+    #*********** Adapter *******************
+    parser.add_argument('--dim_mlp', type=int, default=192, help='adapter bottleneck dimension')
+    parser.add_argument('--mode',default='copy',choices=['copy','new','copy_without_T'])
     
     
-    parser.add_argument('--unfreeze_layers', default=[], nargs='+', type=str)
-    parser.add_argument('--prefix', action='store_true', default=False)
-    parser.add_argument('--prefix_layers', default=[], nargs='+', type=int)
-    parser.add_argument('--task', default='cil', choices=['cil', 'joint'],
-                        type=str, help='task')
-    
+    parser.add_argument('--cross', action='store_true', default=False, help='')
+    parser.add_argument('--joint', action='store_true', default=False, help='')
+
+
     known_args, _ = parser.parse_known_args()
 
-    if known_args.enable_deepspeed:
-        try:
-            import deepspeed
-            from deepspeed import DeepSpeedConfig
-            parser = deepspeed.add_config_arguments(parser)
-            ds_init = deepspeed.initialize
-        except:
-            print("Please 'pip install deepspeed'")
-            exit(0)
-    else:
-        ds_init = None
+
+    ds_init = None
 
     return parser.parse_args(), ds_init
 
@@ -250,10 +257,15 @@ def main(args, ds_init):
     cudnn.benchmark = True
     model = None
     
-    if 'ActivityNet' in args.data_set:
+    if args.data_set == 'ActivityNet':
         args.nb_classes = 200
     elif args.data_set == 'Kinetics-400':
         args.nb_classes = 400
+    elif args.data_set == 'SSV2':
+        args.nb_classes = 174
+        args.n_videos = []
+    elif args.data_set == 'UCF101':
+        args.nb_classes = 101
     else:
         raise ValueError('Unsupported dataset')
         
@@ -263,12 +275,12 @@ def main(args, ds_init):
     else:
         log_writer = None
 
-    mixup_fn = None
-    # mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
-    mixup_active = None
+    args.mixup_fn = None
+    mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
+    # mixup_active = None
     if mixup_active:
         print("Mixup is activated!")
-        mixup_fn = Mixup(
+        args.mixup_fn = Mixup(
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
@@ -283,120 +295,141 @@ def main(args, ds_init):
             width=768,
             layers=12,
             heads=12,
-            drop_path_rate=args.drop_path,
+            drop_path_rate=0.2,
             adapter_scale=0.5,
-            num_classes=args.nb_classes
+            num_classes=args.nb_classes,
+            dim_mlp=args.dim_mlp,
+            input_prompt_type=args.input_prompt_type,
+            input_prompt_len=args.input_prompt_len,
+            init_scale=args.init_scale
         )
         num_layers = model.layers
+        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if args.unfreeze_layers is not None:
+            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+            print('unfreeze list :', unfreeze_list)
     elif args.model == 'CLIP':
         model = CLIP(
             input_resolution=224,
-            prefix=args.prefix,
-            prefix_layers=args.prefix_layers,
             patch_size=16,
             num_frames=args.num_frames,
             width=768,
             layers=12,
             heads=12,
-            drop_path_rate=args.drop_path,
-            num_classes=args.nb_classes
+            drop_path_rate=0.2,
+            adapter_scale=0.5,
+            num_classes=args.nb_classes,
+            dim_mlp=args.dim_mlp,
+            init_scale=args.init_scale
         )
         num_layers = model.layers
-        # for name, param in model.named_parameters():
-        #     if 'temporal_embedding' not in name and 'ln_post' not in name and 'head' not in name and 'Adapter' not in name and 'prefix' not in name:
-        #         param.requires_grad = False
-        
-    else:
+        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if args.unfreeze_layers is not None:
+            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+            print('unfreeze list :', unfreeze_list)
+    elif args.model =='vit_base_patch16_224':
         model = create_model(
-        args.model,
-        pretrained=False,
-        num_classes=args.nb_classes,
-        all_frames=args.num_frames * args.num_segments,
-        tubelet_size=args.tubelet_size,
-        fc_drop_rate=args.fc_drop_rate,
-        drop_rate=args.drop,
-        drop_path_rate=args.drop_path,
-        attn_drop_rate=args.attn_drop_rate,
-        drop_block_rate=None,
-        use_checkpoint=args.use_checkpoint,
-        use_mean_pooling=args.use_mean_pooling,
-        init_scale=args.init_scale,
-    )
-        num_layers = model.get_num_layers()
+            args.model,
+            pretrained=False,
+            num_classes=args.nb_classes,
+            all_frames=args.num_frames * args.num_segments,
+            tubelet_size=args.tubelet_size,
+            fc_drop_rate=args.fc_drop_rate,
+            drop_rate=args.drop,
+            drop_path_rate=args.drop_path,
+            attn_drop_rate=args.attn_drop_rate,
+            drop_block_rate=None,
+            use_checkpoint=args.use_checkpoint,
+            use_mean_pooling=args.use_mean_pooling,
+            init_scale=args.init_scale,
+            dim_mlp = args.dim_mlp
+        )
+        patch_size = model.patch_embed.patch_size
+        print("Patch size = %s" % str(patch_size))
+        args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
+        args.patch_size = patch_size
+        if args.data_set == 'SSV2' and args.pretrain:
+            checkpoint = torch.load(args.pretrain, map_location='cpu')
+            del checkpoint['model']['head.weight']
+            del checkpoint['model']['head.bias'] 
+            msg = model.load_state_dict(checkpoint['model'],strict=False)
+            print('load SSV2 init weight')
+            print(f'{msg}')
         if args.finetune:
-                if args.finetune.startswith('https'):
-                    checkpoint = torch.hub.load_state_dict_from_url(
-                        args.finetune, map_location='cpu', check_hash=True)
+            if args.finetune.startswith('https'):
+                checkpoint = torch.hub.load_state_dict_from_url(
+                    args.finetune, map_location='cpu', check_hash=True)
+            else:
+                checkpoint = torch.load(args.finetune, map_location='cpu')
+
+            print("Load ckpt from %s" % args.finetune)
+            checkpoint_model = None
+            for model_key in args.model_key.split('|'):
+                if model_key in checkpoint:
+                    checkpoint_model = checkpoint[model_key]
+                    print("Load state_dict by model_key = %s" % model_key)
+                    break
+            if checkpoint_model is None:
+                checkpoint_model = checkpoint
+            state_dict = model.state_dict()
+            for k in ['head.weight', 'head.bias']:
+                if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                    print(f"Removing key {k} from pretrained checkpoint")
+                    del checkpoint_model[k]
+
+            all_keys = list(checkpoint_model.keys())
+            new_dict = OrderedDict()
+            for key in all_keys:
+                if key.startswith('backbone.'):
+                    new_dict[key[9:]] = checkpoint_model[key]
+                elif key.startswith('encoder.'):
+                    new_dict[key[8:]] = checkpoint_model[key]
                 else:
-                    checkpoint = torch.load(args.finetune, map_location='cpu')
+                    new_dict[key] = checkpoint_model[key]
+            checkpoint_model = new_dict
 
-                print("Load ckpt from %s" % args.finetune)
-                checkpoint_model = None
-                for model_key in args.model_key.split('|'):
-                    if model_key in checkpoint:
-                        checkpoint_model = checkpoint[model_key]
-                        print("Load state_dict by model_key = %s" % model_key)
-                        break
-                if checkpoint_model is None:
-                    checkpoint_model = checkpoint
-                state_dict = model.state_dict()
-                for k in ['head.weight', 'head.bias']:
-                    if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                        print(f"Removing key {k} from pretrained checkpoint")
-                        del checkpoint_model[k]
+            # interpolate position embedding
+            if 'pos_embed' in checkpoint_model:
+                pos_embed_checkpoint = checkpoint_model['pos_embed']
+                embedding_size = pos_embed_checkpoint.shape[-1] # channel dim
+                num_patches = model.patch_embed.num_patches # 
+                num_extra_tokens = model.pos_embed.shape[-2] - num_patches # 0/1
 
-                all_keys = list(checkpoint_model.keys())
-                new_dict = OrderedDict()
-                for key in all_keys:
-                    if key.startswith('backbone.'):
-                        new_dict[key[9:]] = checkpoint_model[key]
-                    elif key.startswith('encoder.'):
-                        new_dict[key[8:]] = checkpoint_model[key]
-                    else:
-                        new_dict[key] = checkpoint_model[key]
-                checkpoint_model = new_dict
+                # height (== width) for the checkpoint position embedding 
+                orig_size = int(((pos_embed_checkpoint.shape[-2] - num_extra_tokens)//(args.num_frames // model.patch_embed.tubelet_size)) ** 0.5)
+                # height (== width) for the new position embedding
+                new_size = int((num_patches // (args.num_frames // model.patch_embed.tubelet_size) )** 0.5)
+                # class_token and dist_token are kept unchanged
+                if orig_size != new_size:
+                    print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
+                    extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+                    # only the position tokens are interpolated
+                    pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+                    # B, L, C -> BT, H, W, C -> BT, C, H, W
+                    pos_tokens = pos_tokens.reshape(-1, args.num_frames // model.patch_embed.tubelet_size, orig_size, orig_size, embedding_size)
+                    pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+                    pos_tokens = torch.nn.functional.interpolate(
+                        pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+                    # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
+                    pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(-1, args.num_frames // model.patch_embed.tubelet_size, new_size, new_size, embedding_size) 
+                    pos_tokens = pos_tokens.flatten(1, 3) # B, L, C
+                    new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+                    checkpoint_model['pos_embed'] = new_pos_embed
 
-                # interpolate position embedding
-                if 'pos_embed' in checkpoint_model:
-                    pos_embed_checkpoint = checkpoint_model['pos_embed']
-                    embedding_size = pos_embed_checkpoint.shape[-1] # channel dim
-                    num_patches = model.patch_embed.num_patches # 
-                    num_extra_tokens = model.pos_embed.shape[-2] - num_patches # 0/1
+            utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-                    # height (== width) for the checkpoint position embedding 
-                    orig_size = int(((pos_embed_checkpoint.shape[-2] - num_extra_tokens)//(args.num_frames // model.patch_embed.tubelet_size)) ** 0.5)
-                    # height (== width) for the new position embedding
-                    new_size = int((num_patches // (args.num_frames // model.patch_embed.tubelet_size) )** 0.5)
-                    # class_token and dist_token are kept unchanged
-                    if orig_size != new_size:
-                        print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
-                        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-                        # only the position tokens are interpolated
-                        pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-                        # B, L, C -> BT, H, W, C -> BT, C, H, W
-                        pos_tokens = pos_tokens.reshape(-1, args.num_frames // model.patch_embed.tubelet_size, orig_size, orig_size, embedding_size)
-                        pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-                        pos_tokens = torch.nn.functional.interpolate(
-                            pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
-                        # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
-                        pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(-1, args.num_frames // model.patch_embed.tubelet_size, new_size, new_size, embedding_size) 
-                        pos_tokens = pos_tokens.flatten(1, 3) # B, L, C
-                        new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-                        checkpoint_model['pos_embed'] = new_pos_embed
-
-                utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
 
     model.to(device)
     model_without_ddp = model
 
     print("Model = %s" % str(model_without_ddp))
 
-    if args.unfreeze_layers is not None:
-        model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-        print('unfreeze list :', unfreeze_list)
 
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
+
+    n_parameters_after_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print('*******Number of params before freeze*******:', n_parameters_before_freeze)
+    print('*******Number of params after freeze*******:', n_parameters_after_freeze)
 
     total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
     args.lr = args.lr * total_batch_size / 256
@@ -405,8 +438,10 @@ def main(args, ds_init):
     print("LR = %.8f" % args.lr)
     print("Batch size = %d" % total_batch_size)
     print("Update frequent = %d" % args.update_freq)
+    gpu_num = utils.get_world_size()
 
 
+        
 
 
 
@@ -422,11 +457,10 @@ def main(args, ds_init):
     skip_weight_decay_list = model.no_weight_decay()
     print("Skip weight decay list: ", skip_weight_decay_list)
 
-
+    args.skip_weight_decay_list = skip_weight_decay_list
+    args.assigner = assigner
 
     if args.enable_deepspeed:
-        args.skip_weight_decay_list = skip_weight_decay_list
-        args.assigner = assigner
         args.ds_init = ds_init
         loss_scaler = None
         optimizer_params = get_parameter_groups(
@@ -456,21 +490,36 @@ def main(args, ds_init):
     print("criterion = %s" % str(criterion))
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    data_loader, class_mask = build_dataloader(args)
+    data_loader, class_mask,n_vids,_ = build_continual_dataloader(args)
+ #!************ Information *************
+    print()
+    print("="*40)
+    print("Training Configuration")
+    print("="*40)
+    print(f"Dataset Name: {args.data_set}")
+    print(f"Model Name: {args.model}")
+    print(f"Model Parameters: {n_parameters_after_freeze}")
+    print(f"Total Number of GPUs: {gpu_num}")
+    print(f"Batch Size per GPU: {args.batch_size}")
+    print(f"Number of Tasks: {args.num_tasks}")
+    print("Number of Videos per Task: ")
+    for task_idx, vid_count in enumerate(n_vids, start=1):
+        print(f"\tTask {task_idx}: {vid_count} videos")
+    print(f"Rehearsal Memory Size: {args.memory_size}")
+    print(f"Rehearsal Epochs: {args.rehearsal_epochs}")
+    print("="*40)
+#!************ Information *************
 
-    if args.task == 'cil':
-        from engine_for_cil import train_and_evaluate
-        train_and_evaluate(model, model_without_ddp,
+
+    train_and_evaluate(model, model_without_ddp,
                     criterion, data_loader, optimizer,
-                    device, class_mask, args)
-        total_time = time.time() - start_time
-        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print(f"Total training time: {total_time_str}")
-
+                    device, class_mask, args,loss_scaler)
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    print(f"Total training time: {total_time_str}")
 
 if __name__ == '__main__':
     opts, ds_init = get_args_cil()
-    assert opts.task == 'cil'
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
     main(opts, ds_init)

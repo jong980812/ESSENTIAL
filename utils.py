@@ -334,9 +334,34 @@ def init_distributed_mode(args):
 
 
 
+def calculate_weighted_averages(matrix, n_videos):
+    row_averages = [np.average(row[:i+1], weights =n_videos[:i+1]) if len(row) > 0 else 0 for i, row in enumerate(matrix)]
+    overall_average = np.mean(row_averages)
+    return row_averages, overall_average
+def print_matrix_with_aligned_averages(matrix, n_videos):
+    row_averages, overall_average = calculate_weighted_averages(matrix, n_videos)
+    
+    max_row_length = max(len(row) for row in matrix)
+    row_format = "{" + f":<{max_row_length * 3}" + "}"
+    
+    for i, row in enumerate(matrix):
+        row_str = ", ".join(f"{num:.2f}" for num in row)  
+        formatted_row = row_format.format(row_str)  
+        print(f"[{formatted_row}] | Weighted Average: {row_averages[i]:.2f}")
+    
+    print(" " * (max_row_length * 3 + 2) + f"Overall Weighted Average: {overall_average:.2f}") 
 
-
-
+def unfreeze_block(model, block_list):
+    unfreeze_list = []
+    for name, param in model.named_parameters():
+        for block in block_list:#if block in block_list
+            if block in name:
+                param.requires_grad = True
+                unfreeze_list.append(name)
+                break
+            else:
+                param.requires_grad = False
+    return model, unfreeze_list
 
 
 

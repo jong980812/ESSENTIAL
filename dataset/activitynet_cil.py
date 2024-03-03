@@ -38,7 +38,7 @@ class ActivitynetDataset(Dataset):
     def __init__(self, anno_list, data_path, mode='train', clip_len=8,
                  crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='frame',rehearsal=False):
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='decord',rehearsal=False):
         self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
@@ -72,11 +72,21 @@ class ActivitynetDataset(Dataset):
      
         self.label_array = []
         self.dataset_samples = []
+        self.label_name_array=[]
+        # if not rehearsal:
+        #     for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
+        #         for video_info in videos:
+        #             self.label_array.append(label_num + args.classes_per_task*task_id)
+        #             self.dataset_samples.append(video_info)
         if not rehearsal:
             for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
                 for video_info in videos:
-                    self.label_array.append(label_num + args.classes_per_task*task_id)
+                    if task_id == 0:
+                        self.label_array.append(label_num )
+                    else:
+                        self.label_array.append(label_num + args.classes_per_task[task_id-1])
                     self.dataset_samples.append(video_info)
+                    self.label_name_array.append(label_name)
         else:
             with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
                 args.memory_video_path = json.load(file)
@@ -151,7 +161,7 @@ class ActivitynetDataset(Dataset):
             if end_ratio > 1:
                 end_ratio = 1.0
             video_name = video_info['filename']
-
+            
             buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
@@ -191,9 +201,7 @@ class ActivitynetDataset(Dataset):
                 end_ratio = 1.0
 
             video_name = video_info['filename']
-            
-            
-            
+
             buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
@@ -402,24 +410,16 @@ class ActivitynetDataset(Dataset):
             return buffer
 
         # handle temporal segments
-        total_frames = len(vr)
-        start_frame = int(start_ratio * total_frames)
-        end_frame = math.ceil(end_ratio * total_frames)
-        video_length = end_frame-start_frame
-        if video_length ==0:
+        total_frames = len(vr)-1
+
+        start_frame = int(start_ratio * total_frames) 
+        end_frame = int(end_ratio * total_frames) 
+        video_length = end_frame - start_frame
+        if video_length <= 0:
+            print(f"Warning: video_length is zero or negative. Adjusting end_frame. {video_name}")
             video_length = 1
-        # if video_length < self.num_segment :
-        #     deficit = self.num_segment - video_length
-        #     front_padding = min(deficit // 2, start_frame)
-        #     end_padding = min(deficit - front_padding, total_frames - end_frame)
-            
-        #     start_frame -= front_padding
-        #     end_frame += end_padding
-            
-        #     video_length = end_frame - start_frame  # Update video_length
-        #     print("video_length is short: ", fname)
-            
-        average_duration = video_length // self.num_segment  #self.num_segment -> frame
+
+        average_duration = video_length // self.num_segment
         all_index = []
         if average_duration > 0:
             all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
