@@ -2,10 +2,10 @@ import os, pickle
 from torchvision import transforms
 from transforms import *
 from masking_generator import TubeMaskingGenerator
-from kinetics_cil import KineticsDataset, VideoMAE
-from ssv2_cil import SSVideoClsDataset
-from activitynet_cil import ActivitynetDataset
-from ucf101_cil import UCFVideoClsDataset
+from dataset.kinetics_cil import KineticsDataset, VideoMAE
+from dataset.ssv2_cil import SSVideoClsDataset
+from dataset.activitynet_cil import ActivitynetDataset
+from dataset.ucf101_cil import UCFVideoClsDataset
 import utils
 def is_double_list(obj):
     if isinstance(obj, list):

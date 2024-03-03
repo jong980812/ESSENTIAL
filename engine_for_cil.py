@@ -55,43 +55,68 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         #TODO pick best model using validation
         max_accuracy = 0.0
 
-        if not args.joint:
-            if task_id > 0:
-                # reinit_optimizer
-                if loss_scaler is None:
-                    optimizer_params = get_parameter_groups(
-                        model_without_ddp, args.weight_decay, args.skip_weight_decay_list,
-                        args.assigner.get_layer_id if args.assigner is not None else None,
-                        args.assigner.get_scale if args.assigner is not None else None)
-                    model, optimizer, _, _ = args.ds_init(
-                        args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
-                    ) 
-                else:
+        if task_id > 0:
+            # reinit_optimizer
+            if loss_scaler is None:
+                optimizer_params = get_parameter_groups(
+                    model_without_ddp, args.weight_decay, args.skip_weight_decay_list,
+                    args.assigner.get_layer_id if args.assigner is not None else None,
+                    args.assigner.get_scale if args.assigner is not None else None)
+                model, optimizer, _, _ = args.ds_init(
+                    args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
+                ) 
+            else:
 
-                    #! Adapter 에서 0번 태스크 이후 작동하는 함수들 따로 지정.
-                    if args.model == 'AIM_adapter_v2':
-                        model.module.freeze()                  
-                        model.module.transformer.add_adapters(mode=args.mode)
-                        model.module.transformer.del_adapters()
-                        model.to(args.device)
-                        model_without_ddp = model.module
-                    elif args.model == 'AIM_adapter':
-                        model.module.transformer.freeze_adapters()                
-                        model.module.transformer.add_adapters(mode=args.mode)
-                        model.module.transformer.del_adapters()
-                        model.to(args.device)
-                        model_without_ddp = model.module
-                    optimizer = create_optimizer(
-                    args, model_without_ddp, skip_list=args.skip_weight_decay_list,
-                    get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
-                    get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
-                    loss_scaler = NativeScaler()
+                #! Adapter 에서 0번 태스크 이후 작동하는 함수들 따로 지정.
+                if args.model == 'AIM_adapter_v2':
+                    model.module.freeze()                  
+                    model.module.transformer.add_adapters(mode=args.mode)
+                    model.module.transformer.del_adapters()
+                    model.to(args.device)
+                    model_without_ddp = model.module
+                elif args.model == 'AIM_adapter':
+                    model.module.transformer.freeze_adapters()                
+                    model.module.transformer.add_adapters(mode=args.mode)
+                    model.module.transformer.del_adapters()
+                    model.to(args.device)
+                    model_without_ddp = model.module
+                optimizer = create_optimizer(
+                args, model_without_ddp, skip_list=args.skip_weight_decay_list,
+                get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
+                get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
+                loss_scaler = NativeScaler()
          
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
-        # if task_id == 0:
-        #     continue
+        
+        #!************************ Traininig *************************************
+        for epoch in range(epochs): 
+            if args.distributed:
+                data_loader[task_id]['train'].sampler.set_epoch(epoch)   
+            header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {epochs}]'
+            train_stats = train_one_epoch(model=model, criterion=criterion, 
+                                        data_loader=data_loader[task_id]['train'], optimizer=optimizer, 
+                                        device=device, epoch=epoch, max_norm=args.clip_grad, 
+                                        set_training_mode=True, task_id=task_id, class_mask=class_mask, args=args,
+                                        start_steps=epoch * num_training_steps_per_epoch,
+                                        lr_schedule_values=lr_schedule_values, 
+                                        wd_schedule_values=wd_schedule_values,
+                                        num_training_steps_per_epoch=num_training_steps_per_epoch, 
+                                        update_freq=args.update_freq, header= header,loss_scaler=loss_scaler
+                                        )
 
+
+            # save model per epoch
+            Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
+            checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_{}_checkpoin t.pth'.format(task_id+1, epoch+1))
+
+            state_dict = {
+                        'model': model_without_ddp.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'epoch': epoch,
+                        'args': args,
+                    }
+            utils.save_on_master(state_dict, checkpoint_path)
         #!************************ Rehearsal *************************************
         if args.memory_size > 0:
                    # lr scehdule
