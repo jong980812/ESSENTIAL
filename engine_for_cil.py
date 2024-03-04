@@ -107,16 +107,17 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
             # save model per epoch
-            Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
-            checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_{}_checkpoin t.pth'.format(task_id+1, epoch+1))
+            if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
+                Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
+                checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_{}_checkpoint.pth'.format(task_id+1, epoch+1))
 
-            state_dict = {
-                        'model': model_without_ddp.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        'epoch': epoch,
-                        'args': args,
-                    }
-            utils.save_on_master(state_dict, checkpoint_path)
+                state_dict = {
+                            'model': model_without_ddp.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'epoch': epoch,
+                            'args': args,
+                        }
+                utils.save_on_master(state_dict, checkpoint_path)
         #!************************ Rehearsal *************************************
         if args.memory_size > 0:
                    # lr scehdule

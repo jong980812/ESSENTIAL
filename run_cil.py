@@ -38,7 +38,7 @@ def get_args_cil():
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--update_freq', default=1, type=int)
-    parser.add_argument('--save_ckpt_freq', default=100, type=int)
+    parser.add_argument('--save_ckpt_freq', default=20, type=int)
     parser.add_argument('--val_freq', default=5, type=int)
 
     # Model parameters
@@ -299,11 +299,6 @@ def main(args, ds_init):
             adapter_scale=0.5,
             num_classes=args.nb_classes,
             dim_mlp=args.dim_mlp,
-<<<<<<< HEAD
-=======
-            # input_prompt_type=args.input_prompt_type,
-            # input_prompt_len=args.input_prompt_len,
->>>>>>> ed17e392733684bc4105671c1906a020f49ccb9d
             init_scale=args.init_scale
         )
         num_layers = model.layers
