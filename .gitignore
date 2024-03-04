@@ -1,6 +1,5 @@
 # ext
 *.out
-*.pkl
 *.ipynb
 *.pyc
 *__pycache__
