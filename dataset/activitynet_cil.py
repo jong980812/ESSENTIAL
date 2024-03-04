@@ -18,7 +18,7 @@ import os
 import av
 from PIL import Image
 import utils,json
-
+import copy
 
 os.environ["FFMPEG_LOG_LEVEL"] = "panic"
 
@@ -90,8 +90,8 @@ class ActivitynetDataset(Dataset):
         else:
             with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
                 args.memory_video_path = json.load(file)
-            self.label_array = args.memory_video_path['label_array']
-            self.dataset_samples = args.memory_video_path['dataset_samples']
+            self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
+            self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
             self.mode ='train'
 
 

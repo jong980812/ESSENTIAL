@@ -12,5 +12,6 @@
 # log
 debug/
 logs/
+scripts/
 multinode_sh/
 **/result*/
