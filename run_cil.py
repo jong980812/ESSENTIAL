@@ -299,6 +299,11 @@ def main(args, ds_init):
             adapter_scale=0.5,
             num_classes=args.nb_classes,
             dim_mlp=args.dim_mlp,
+<<<<<<< HEAD
+=======
+            # input_prompt_type=args.input_prompt_type,
+            # input_prompt_len=args.input_prompt_len,
+>>>>>>> ed17e392733684bc4105671c1906a020f49ccb9d
             init_scale=args.init_scale
         )
         num_layers = model.layers

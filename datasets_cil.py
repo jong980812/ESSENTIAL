@@ -52,7 +52,7 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
         if is_train is True:
             mode = 'train'
         elif test_mode is True:
-            mode = 'test'
+            mode = 'validation'
         else:  
             mode = 'validation'
         data_path ='/local_datasets/something-something/something-something-v2-mp4'
@@ -79,7 +79,7 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
         if is_train is True:
             mode = 'train'
         elif test_mode is True:
-            mode = 'test'
+            mode = 'validation'
         else:  
             mode = 'validation'
         data_path = '/local_datasets/ucf101/videos'
@@ -109,7 +109,7 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
         if is_train is True:
             mode = 'train'
         elif test_mode is True:
-            mode = 'test'
+            mode = 'validation'
         else:  
             mode = 'validation'
 
