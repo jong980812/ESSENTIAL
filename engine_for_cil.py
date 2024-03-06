@@ -123,6 +123,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                    # lr scehdule
             total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
             num_training_steps_per_epoch = len(data_loader[task_id]['rehearsal'].dataset) // total_batch_size
+            if num_training_steps_per_epoch ==0:
+                num_training_steps_per_epoch=1
             print("Use step level LR scheduler!")
             lr_schedule_values = utils.cosine_scheduler(
                 args.lr, args.min_lr, args.rehearsal_epochs, num_training_steps_per_epoch,

@@ -221,7 +221,7 @@ def build_continual_dataloader(args):
                 batch_size=args.batch_size,
                 num_workers=args.num_workers,
                 pin_memory=args.pin_mem,
-                drop_last=True,
+                drop_last=False if len(dataset_rehearsal)<args.batch_size*utils.get_world_size() else True,#total batch가 rehearsal보다 크면 .
             )
         data_loader_val = torch.utils.data.DataLoader(
             dataset_val, sampler=sampler_val,
