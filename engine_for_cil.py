@@ -29,7 +29,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     for task_id in range(args.num_tasks):
         # SSv2 초반 epoch을 위해 만들어놓았지만, 현재 사용 안함.
         if task_id == 0 and args.data_set == "SSV2":
-            warmup_epochs,epochs = args.warmup_epochs,args.epochs
+            warmup_epochs,epochs = args.warmup_epochs//2,args.epochs//2
         else:
             warmup_epochs,epochs = args.warmup_epochs,args.epochs
             
