@@ -46,7 +46,7 @@ class LayerDecayValueAssigner(object):
         return get_num_layer_for_vit(var_name, len(self.values))
 
 
-def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=None, get_layer_scale=None):
+def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=None, get_layer_scale=None,slow_learner=False):
     parameter_group_names = {}
     parameter_group_vars = {}
 
@@ -56,6 +56,9 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
         if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
             group_name = "no_decay"
             this_weight_decay = 0.
+        elif 'blocks' in name and slow_learner:
+            group_name = 'slow'
+            this_weight_decay = weight_decay
         else:
             group_name = "decay"
             this_weight_decay = weight_decay
@@ -97,7 +100,7 @@ def create_optimizer(args, model, get_num_layer=None, get_layer_scale=None, filt
             skip = skip_list
         elif hasattr(model, 'no_weight_decay'):
             skip = model.no_weight_decay()
-        parameters = get_parameter_groups(model, weight_decay, skip, get_num_layer, get_layer_scale)
+        parameters = get_parameter_groups(model, weight_decay, skip, get_num_layer, get_layer_scale,args.slow_learner)
         weight_decay = 0.
     else:
         parameters = model.parameters()

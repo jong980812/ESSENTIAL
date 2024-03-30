@@ -80,17 +80,26 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.transformer.del_adapters()
                     model.to(args.device)
                     model_without_ddp = model.module
+                # # model.module.transformer.initial_adapter(args.adapter_init_scale)
+                model.module.transformer.transfer_c_to_p()
+                model.module.transformer.set_first(False)
                 optimizer = create_optimizer(
                 args, model_without_ddp, skip_list=args.skip_weight_decay_list,
                 get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
                 get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
                 loss_scaler = NativeScaler()
-         
+        
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
-        
+        print('****Up Projection weight****')
+        # print(model.module.transformer.resblocks[5].T_Adapter.D_fc2.weight[:20,0])
+        # if task_id<4:
+            # continue
         #!************************ Traininig *************************************
         for epoch in range(epochs): 
+            # break
+            # if epoch == epochs-5 and task_id>0:
+                # model.module.transformer.set_first(False)
             if args.distributed:
                 data_loader[task_id]['train'].sampler.set_epoch(epoch)   
             header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {epochs}]'
@@ -146,12 +155,12 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 rehearsal_stats = train_one_epoch(model=model, criterion=criterion, 
                                             data_loader=data_loader[task_id]['rehearsal'], optimizer=optimizer, 
                                             device=device, epoch=epoch, max_norm=args.clip_grad, 
-                                            set_training_mode=True, task_id=task_id, class_mask=None, args=args,
+                                            set_training_mode=True, task_id=task_id, class_mask=class_mask, args=args,
                                             start_steps=epoch * num_training_steps_per_epoch,
                                             lr_schedule_values=lr_schedule_values, 
                                             wd_schedule_values=wd_schedule_values,
                                             num_training_steps_per_epoch=num_training_steps_per_epoch, 
-                                            update_freq=args.update_freq, header=header,loss_scaler=loss_scaler
+                                            update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
                 
     
@@ -200,7 +209,7 @@ def train_one_epoch(model: torch.nn.Module,
                     device: torch.device, epoch: int, max_norm: float = 0,
                     set_training_mode=True, task_id=-1, class_mask=None, args = None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None,header=None,loss_scaler=None
+                    num_training_steps_per_epoch=None, update_freq=None,header=None,loss_scaler=None, rehearsal = False
                     ):
 
     model.train(set_training_mode)
@@ -228,14 +237,18 @@ def train_one_epoch(model: torch.nn.Module,
                     param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
                     if i ==0:
                         param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
-                        
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
         mask = None
         if class_mask is not None:
-            mask = class_mask[task_id]
+            if rehearsal:
+                mask = []
+                for i in range(task_id+1):
+                    mask+=class_mask[i]
+            else:
+                mask = class_mask[task_id]
        
         if args.mixup_fn is not None:
             samples, targets = args.mixup_fn(samples, targets)

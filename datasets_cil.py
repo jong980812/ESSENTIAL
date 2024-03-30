@@ -55,7 +55,9 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
             mode = 'validation'
         else:  
             mode = 'validation'
-        data_path ='/local_datasets/something-something/something-something-v2-mp4'
+        data_path ='/local_datasets/something-something-v2/videos'
+        if not os.path.isdir(data_path):
+            data_path = '/local_datasets/something-something/something-something-v2-mp4'
         dataset = SSVideoClsDataset(
             anno_list=anno_list,
             data_path=data_path,
@@ -112,10 +114,14 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
             mode = 'validation'
         else:  
             mode = 'validation'
-
+        data_path = '/local_datasets/Activitynet/videos_256/'
+        if not os.path.isdir(data_path):
+            data_path = '/data2/local_datasets/Activity_256/videos_256/'
+            if not os.path.isdir(data_path):
+                data_path = '/local_datasets/Activitynet/videos_256/'
         dataset = ActivitynetDataset(
             anno_list=anno_list,
-            data_path='/local_datasets/Activitynet/videos_256/',
+            data_path=data_path,
             mode=mode,
             clip_len=1,
             num_segment=args.num_frames,
@@ -174,8 +180,8 @@ def build_continual_dataloader(args):
     for i in range(args.num_tasks):
         dataset_train = build_dataset(is_train=True, test_mode=False, args=args,anno_list=anno_list['train'][i],task_id=i)
         dataset_val = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['val'][i],task_id=i)
-        if args.data_set == 'SSV2':
-            args.n_videos.append(len(dataset_val))
+        # if args.data_set == 'SSV2':
+        args.n_videos.append(len(dataset_val))
         # TODO Test views
 
 # # TODO Test views

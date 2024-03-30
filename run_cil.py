@@ -32,7 +32,8 @@ from engine_for_cil import train_and_evaluate
 from model.modeling_AIM import AIM
 from model.modeling_CLIP import CLIP
 from model.modeling_CLIP_S import CLIP_S
-
+from model.modeling_AIM_prev import AIM_prev
+import model.modelling_vmae
 
 import random
 def get_args_cil():
@@ -203,6 +204,7 @@ def get_args_cil():
     #! Our Argument는 여기다가
     
     parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
+    parser.add_argument('--adapter_layers', default=[0,1,2,3,4,5,6,7,8,9,10,11], nargs='+', type=str)
     
     #********** CIL parameters*****************
     parser.add_argument('--num_tasks', default=10, type=int,
@@ -232,6 +234,9 @@ def get_args_cil():
     
     parser.add_argument('--cross', action='store_true', default=False, help='')
     parser.add_argument('--joint', action='store_true', default=False, help='')
+    parser.add_argument('--slow_learner', action='store_true', default=False, help='')
+    parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
+    
 
 
     known_args, _ = parser.parse_known_args()
@@ -269,6 +274,7 @@ def main(args, ds_init):
         args.nb_classes = 101
     else:
         raise ValueError('Unsupported dataset')
+    args.n_videos = []
         
     args.n_videos = []
     if utils.get_rank() == 0 and args.log_dir is not None:
@@ -308,6 +314,27 @@ def main(args, ds_init):
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
+    elif args.model == 'AIM_prev':
+        model = AIM_prev(
+            input_resolution=224,
+            patch_size=16,
+            num_frames=args.num_frames,
+            width=768,
+            layers=12,
+            heads=12,
+            drop_path_rate=0.2,
+            adapter_scale=0.5,
+            num_classes=args.nb_classes,
+            dim_mlp=args.dim_mlp,
+            init_scale=args.init_scale
+        )
+        num_layers = model.layers
+        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if args.unfreeze_layers is not None:
+            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+            print('unfreeze list :', unfreeze_list)
+        model.transformer.transfer_c_to_p()
+        model.transformer.set_first(True)
     elif args.model == 'CLIP':
         model = CLIP(
             input_resolution=224,
@@ -429,6 +456,9 @@ def main(args, ds_init):
                     checkpoint_model['pos_embed'] = new_pos_embed
 
             utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+            if args.unfreeze_layers is not None:
+                model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+                print('unfreeze list :', unfreeze_list)
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
