@@ -184,15 +184,14 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
-    if args.data_set!='SSV2':
-        print('test')
-        evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
-    else:
-        #! SSV2 는 필요함.
-        if utils.is_main_process():
-            print('Average Incremental Accuracy (VAL)')
-            print_matrix_with_aligned_averages(acc_list,args.n_videos)
+        
+    print('test')
+    evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+                                task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
+    #! SSV2 는 필요함.
+    if utils.is_main_process():
+        print('Average Incremental Accuracy (VAL)')
+        print_matrix_with_aligned_averages(acc_list,args.n_videos)
 
     torch.distributed.barrier()
     
@@ -227,6 +226,9 @@ def train_one_epoch(model: torch.nn.Module,
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:
                     param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
+                    if i ==0:
+                        param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
+                        
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
         samples = samples.to(device, non_blocking=True)

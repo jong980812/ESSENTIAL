@@ -13,6 +13,7 @@ import os
 from functools import partial
 from pathlib import Path
 from collections import OrderedDict
+import model.modeling_finetune
 
 from mixup import Mixup
 from timm.models import create_model
@@ -264,12 +265,12 @@ def main(args, ds_init):
         args.nb_classes = 400
     elif args.data_set == 'SSV2':
         args.nb_classes = 174
-        args.n_videos = []
     elif args.data_set == 'UCF101':
         args.nb_classes = 101
     else:
         raise ValueError('Unsupported dataset')
         
+    args.n_videos = []
     if utils.get_rank() == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
@@ -366,13 +367,6 @@ def main(args, ds_init):
         print("Patch size = %s" % str(patch_size))
         args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
         args.patch_size = patch_size
-        if args.data_set == 'SSV2' and args.pretrain:
-            checkpoint = torch.load(args.pretrain, map_location='cpu')
-            del checkpoint['model']['head.weight']
-            del checkpoint['model']['head.bias'] 
-            msg = model.load_state_dict(checkpoint['model'],strict=False)
-            print('load SSV2 init weight')
-            print(f'{msg}')
         if args.finetune:
             if args.finetune.startswith('https'):
                 checkpoint = torch.hub.load_state_dict_from_url(
@@ -391,7 +385,7 @@ def main(args, ds_init):
                 checkpoint_model = checkpoint
             state_dict = model.state_dict()
             for k in ['head.weight', 'head.bias']:
-                if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                if k in checkpoint_model:# and checkpoint_model[k].shape != state_dict[k].shape:
                     print(f"Removing key {k} from pretrained checkpoint")
                     del checkpoint_model[k]
 
@@ -436,7 +430,10 @@ def main(args, ds_init):
 
             utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
+        if args.unfreeze_layers is not None:
+            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+            print('unfreeze list :', unfreeze_list)
+        
 
     model.to(device)
     model_without_ddp = model
