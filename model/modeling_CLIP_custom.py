@@ -8,7 +8,25 @@ from torch import nn
 import clip
 from einops import rearrange
 
-
+class Adapter(nn.Module):
+    def __init__(self, D_features, dim_mlp=192, act_layer=nn.GELU, skip_connect=True):
+        super().__init__()
+        self.skip_connect = skip_connect
+        D_hidden_features = int(dim_mlp)
+        self.act = act_layer()
+        self.D_fc1 = nn.Linear(D_features, D_hidden_features)
+        self.D_fc2 = nn.Linear(D_hidden_features, D_features)
+        
+    def forward(self, x):
+        # x is (BT, HW+1, D)
+        xs = self.D_fc1(x)
+        xs = self.act(xs)
+        xs = self.D_fc2(xs)
+        if self.skip_connect:
+            x = x + xs
+        else:
+            x = xs
+        return x
 
 class LayerNorm(nn.LayerNorm):
     """Subclass torch's LayerNorm to handle fp16."""
@@ -58,8 +76,35 @@ class Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
+class ResidualAttentionBlock_time(nn.Module):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(dim_mlp, dim_mlp)
+        self.ln_1 = LayerNorm(dim_mlp)
 
-class CLIP(nn.Module):
+        self.attn_mask = attn_mask
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.time_adapter_down = nn.Linear(d_model,dim_mlp)
+        self.time_adapter_up = nn.Linear(dim_mlp,d_model)
+        self.time_adapter_act = nn.GELU()
+        self.initial_adapter()
+    def initial_adapter(self):
+        for n, m in self.time_adapter_up.named_modules():
+            for n2, m2 in m.named_modules():
+                if isinstance(m2, nn.Linear):
+                    nn.init.constant_(m2.weight, 0)
+                    nn.init.constant_(m2.bias, 0)
+    def attention(self, x: torch.Tensor):
+        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+    def forward(self, x: torch.Tensor):
+        #입력 cls_token B,T,D
+        xs = self.time_adapter_down(x)
+        xs = self.attention(self.ln_1(xs))
+        xs = self.time_adapter_up(xs)
+        return xs
+
+class CLIP_custom(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192):
         super().__init__()
@@ -77,6 +122,8 @@ class CLIP(nn.Module):
         # self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
 
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        # print(self.transformer_for_cls.load_state_dict(self.transformer.resblocks[-1].state_dict(),strict=False))
         self.ln_post = LayerNorm(width)
 
         embed_dim = 768
@@ -161,6 +208,11 @@ class CLIP(nn.Module):
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
+        #
+        x = rearrange(x, 'b d t -> t b d',b=B,t=T)
+        x = self.transformer_for_cls(x)+x
+        x = rearrange(x, 't b d -> b d t',b=B,t=T)
+        #
         x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
         
         if self.avg_pool is not None:
