@@ -5,7 +5,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-import clip
+# import clip
+from models.clip_custom import clip
 from einops import rearrange
 
 
@@ -108,54 +109,60 @@ class Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
-    def initial_adapter(self,init_scale):
-        for n, m in self.resblocks.named_modules():
-            if 'Adapter' in n:
-                for n2, m2 in m.named_modules():
-                    if 'D_fc2' in n2:
-                        if isinstance(m2, nn.Linear):
-                            # nn.init.constant_(m2.weight, 0)
-                            # nn.init.constant_(m2.bias, 0)
-                            m2.weight.data.mul_(init_scale)
-                            m2.bias.data.mul_(init_scale)
-    def down_freeze(self):
-        for n, m in self.resblocks.named_modules():
-            if 'Adapter' in n:
-                for n2, m2 in m.named_modules():
-                    if 'D_fc1' in n2:
-                        if isinstance(m2, nn.Linear):
-                            # nn.init.constant_(m2.weight, 0)
-                            # nn.init.constant_(m2.bias, 0)
-                            m2.weight.requires_grad_(False)
-                            m2.bias.requires_grad_(False)
-    def down_unfreeze(self):
-        for n, m in self.resblocks.named_modules():
-            if 'Adapter' in n:
-                for n2, m2 in m.named_modules():
-                    if 'D_fc1' in n2:
-                        if isinstance(m2, nn.Linear):
-                            # nn.init.constant_(m2.weight, 0)
-                            # nn.init.constant_(m2.bias, 0)
-                            m2.weight.requires_grad_(True)
-                            m2.bias.requires_grad_(True)
 
-class AIM(nn.Module):
+class AIM_text(nn.Module):
     ## ViT definition in CLIP image encoder
-    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[]):
+    def __init__(self, 
+                 input_resolution: int,
+                num_frames: int,
+                patch_size: int,
+                width: int,
+                layers: int,
+                heads: int,
+                drop_path_rate,
+                num_tadapter=1,
+                adapter_scale=0.5,
+                pretrained=None,
+                num_classes=400,
+                init_scale=0.001,
+                spatial_type='avg',
+                dropout_ratio=0.2,
+                dim_mlp=192,
+                class_list = None,
+                text_dim=512,
+                device='cpu',
+                args=None,
+                adapter_layers = []):
         super().__init__()
+        
+        # self.actionlist, self.actiondict, self.actiontoken = class_list
+        self.text_dim = text_dim
+        #! text
+        self.device = device
+        self.clip_text_encoder, _ = clip.load('ViT-B/16', device=self.device, jit=False, return_intermediate_text_feature=0) 
+        del self.clip_text_encoder.visual
+        # self.clip_text_encoder.text_projection = nn.Parameter(torch.zeros(self.text_dim,self.text_dim))
+        self.action_embedding = torch.nn.Embedding(77, self.text_dim)
+        for paramclip in self.clip_text_encoder.parameters():
+            paramclip.requires_grad = False
+        self.proj = nn.Parameter(torch.randn(width,self.text_dim))
+        self.prefix, self.postfix = args.prefix,args.postfix
+        #! 
         self.input_resolution = input_resolution
         self.pretrained = pretrained
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
+        # self.input_prompt = nn.Parameter(scale * torch.randn(10,width))
 
         scale = width ** -0.5
         self.layers = layers
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
         self.ln_pre = LayerNorm(width)
-        self.adapter_layers = adapter_layers
+
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
 
+        self.adapter_layers = adapter_layers
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
 
         self.ln_post = LayerNorm(width)
@@ -203,7 +210,7 @@ class AIM(nn.Module):
                 clip_model, preprocess = clip.load("ViT-L/14", device="cpu")
             pretrain_dict = clip_model.visual.state_dict()
             del clip_model
-            del pretrain_dict['proj']
+            # del pretrain_dict['proj']
             msg = self.load_state_dict(pretrain_dict, strict=False)
             print('Missing keys: {}'.format(msg.missing_keys))
             print('Unexpected keys: {}'.format(msg.unexpected_keys))
@@ -249,7 +256,7 @@ class AIM(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor):
+    def forward_features(self, x: torch.Tensor):
         B, C, T, H, W = x.shape
         x = rearrange(x, 'b c t h w -> (b t) c h w')
         x = self.conv1(x)  
@@ -257,6 +264,7 @@ class AIM(nn.Module):
         x = x.permute(0, 2, 1)
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         x = x + self.positional_embedding.to(x.dtype)
+        # x = torch.cat([x, self.input_prompt.expand(B*T,10,x.shape[-1])],dim=1) if self.input_prompt_type=='space' and self.prompt else x
 
         n = x.shape[1]
         # x = rearrange(x, '(b t) n d -> (b n) t d', t=self.num_frames)
@@ -269,21 +277,49 @@ class AIM(nn.Module):
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
-        x = x[:, 0]
-        x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
+        x = x[:, 0]#bt d
+        x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
+        x = x.mean(1)
+        return x
         
-        x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
+        # x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
         
-        if self.avg_pool is not None:
-            x = self.avg_pool(x)
-        # [N, in_channels, 1, 1, 1]
-        if self.dropout is not None:
-            x = self.dropout(x)
-        # [N, in_channels, 1, 1, 1]
-        x = x.view(x.shape[0], -1)
-        # [N, in_channels]
-        cls_score = self.head(x)
-        # [N, num_classes]
-        return cls_score
+        # if self.avg_pool is not None:
+        #     x = self.avg_pool(x)
+        # # [N, in_channels, 1, 1, 1]
+        # if self.dropout is not None:
+        #     x = self.dropout(x)
+        # # [N, in_channels, 1, 1, 1]
+        # x = x.view(x.shape[0], -1)
+        # # [N, in_channels]
+        # cls_score = self.head(x)
+        # # [N, num_classes]
+        # return cls_score
+    def forward(self,x,action_list,actiondict,actiontoken):
+        action_embedding, prompt_actiontoken = self.replace_text_embedding(action_list, actiondict, actiontoken)
+        actionFeature = self.clip_text_encoder.encode_text(action_embedding, prompt_actiontoken)
+        
+        cls_tokens = self.forward_features(x)
+        x = cls_tokens @ self.proj
+        return x, actionFeature
+        
+        
+    def replace_text_embedding(self, actionlist, actiondict, actiontoken):
+        text_embedding = self.action_embedding(torch.arange(77).to(self.device))[None, :].repeat([len(actionlist), 1, 1])
+        prompt_texttoken = torch.zeros(len(actionlist), 77)  
+
+        for i, a in enumerate(actionlist):
+            embedding = torch.from_numpy(actiondict[a][0]).float().to(self.device)
+            token = torch.from_numpy(actiontoken[a][0])
+            text_embedding[i][0] = embedding[0]
+            ind = np.argmax(token, -1)
+
+            text_embedding[i][self.prefix + 1: self.prefix + ind] = embedding[1:ind]
+            text_embedding[i][self.prefix + ind + self.postfix] = embedding[ind]
+
+            prompt_texttoken[i][0] = token[0]
+            prompt_texttoken[i][self.prefix + 1: self.prefix + ind] = token[1:ind]
+            prompt_texttoken[i][self.prefix + ind + self.postfix] = token[ind]
+        return text_embedding, prompt_texttoken
         
    

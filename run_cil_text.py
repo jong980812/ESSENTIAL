@@ -27,14 +27,16 @@ from utils import  multiple_samples_collate
 from utils import  get_args_cil
 from utils import unfreeze_block
 import utils
-from engine_for_cil import train_and_evaluate
+from engine_for_cil_text import train_and_evaluate
 
 from model.modeling_AIM import AIM
 from model.modeling_CLIP import CLIP
 from model.modeling_CLIP_S import CLIP_S
 from model.modeling_AIM_prev import AIM_prev
+from model.modeling_text import AIM_text
 import model.modelling_vmae
 
+from prompt import text_prompt
 import random
 def get_args_cil():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
@@ -205,7 +207,7 @@ def get_args_cil():
     
     parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
     parser.add_argument('--adapter_layers', default=[0,1,2,3,4,5,6,7,8,9,10,11], nargs='+', type=int)
-    
+
     #********** CIL parameters*****************
     parser.add_argument('--num_tasks', default=10, type=int,
                         help='all_task number')
@@ -292,11 +294,14 @@ def main(args, ds_init):
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
+    
+    
+    class_list = text_prompt(dataset=args.data_set, data_path=args.anno_path,device=args.device,args=args)
 
 
 
-    if args.model == 'AIM':
-        model = AIM(
+    if args.model == 'AIM_text':
+        model = AIM_text(
             input_resolution=224,
             patch_size=16,
             num_frames=args.num_frames,
@@ -308,7 +313,10 @@ def main(args, ds_init):
             num_classes=args.nb_classes,
             dim_mlp=args.dim_mlp,
             init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers
+            adapter_layers=args.adapter_layers,
+            args=args,
+            device = args.device,
+            class_list = class_list
         )
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -559,7 +567,7 @@ def main(args, ds_init):
 
     train_and_evaluate(model, model_without_ddp,
                     criterion, data_loader, optimizer,
-                    device, class_mask, args,loss_scaler)
+                    device, class_mask, args,loss_scaler,class_list)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Total training time: {total_time_str}")

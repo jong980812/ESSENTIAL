@@ -4,7 +4,7 @@
 *.pyc
 *__pycache__
 *.pth
-
+models
 #cache
 .vscode/
 

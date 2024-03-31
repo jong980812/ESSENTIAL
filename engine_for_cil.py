@@ -81,8 +81,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.to(args.device)
                     model_without_ddp = model.module
                 # # model.module.transformer.initial_adapter(args.adapter_init_scale)
-                model.module.transformer.transfer_c_to_p()
-                model.module.transformer.set_first(False)
+                # model.module.transformer.transfer_c_to_p()
+                # model.module.transformer.set_first(False)
                 optimizer = create_optimizer(
                 args, model_without_ddp, skip_list=args.skip_weight_decay_list,
                 get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
@@ -235,8 +235,8 @@ def train_one_epoch(model: torch.nn.Module,
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:
                     param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
-                    if i ==0:
-                        param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
+                    if i==0 and args.slow_learner:
+                        param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]/100
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
         samples = samples.to(device, non_blocking=True)

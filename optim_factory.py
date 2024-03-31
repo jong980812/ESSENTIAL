@@ -56,7 +56,7 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
         if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
             group_name = "no_decay"
             this_weight_decay = 0.
-        elif 'blocks' in name and slow_learner:
+        elif 'transformer' in name and slow_learner:
             group_name = 'slow'
             this_weight_decay = weight_decay
         else:
