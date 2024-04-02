@@ -79,7 +79,7 @@ class Transformer(nn.Module):
 class ResidualAttentionBlock_time(nn.Module):
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
         super().__init__()
-        self.attn = nn.MultiheadAttention(dim_mlp, dim_mlp)
+        self.attn = nn.MultiheadAttention(dim_mlp, 6)
         self.ln_1 = LayerNorm(dim_mlp)
 
         self.attn_mask = attn_mask

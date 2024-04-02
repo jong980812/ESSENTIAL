@@ -80,7 +80,10 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.transformer.del_adapters()
                     model.to(args.device)
                     model_without_ddp = model.module
-                model.module.transformer_for_cls.initial_adapter()
+                # model.module.transformer_for_cls.initial_adapter()
+                model.module.transformer.add_task()
+                model.to(args.device)
+                
                 # model.module.transformer.transfer_c_to_p()
                 # model.module.transformer.set_first(False)
                 optimizer = create_optimizer(
@@ -88,7 +91,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
                 get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
                 loss_scaler = NativeScaler()
-        
+        # if task_id < 20:
+        #     continue
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
         print('****Up Projection weight****')
@@ -193,6 +197,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
+    
+    model.module.transformer.add_task()
         
     print('test')
     evaluate_till_now(model=model, data_loader=data_loader, device=device, 
@@ -346,7 +352,7 @@ def get_loss_scale_for_deepspeed(model):
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module,  data_loader, 
-            device, task_id=-1, class_mask=None, args=None,header=None):
+            device, task_id=-1, class_mask=None, args=None,header=None,til=False):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -364,7 +370,11 @@ def evaluate(model: torch.nn.Module,  data_loader,
             # compute output
 
             with torch.cuda.amp.autocast():
-                logits = model(videos)
+                logits = model(videos,task_id) if til  else model(videos)
+                # if til:
+                #     not_mask = np.setdiff1d(np.arange(args.nb_classes), class_mask)
+                #     not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
+                #     logits = logits.index_fill(dim=1, index=not_mask, value=float('-inf'))
                 loss = criterion(logits, target)
 
             acc1, acc5 = accuracy(logits, target, topk=(1, 5))
@@ -386,15 +396,18 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
                     device, task_id=-1, class_mask=None, acc_matrix=None, args=None,test_mode=False):
     stat_matrix = np.zeros((3, args.num_tasks)) # 3 for Acc@1, Acc@5, Loss
     print('eval')
+    import random
+    num_task = args.num_tasks
     for i in range(task_id+1):
+        mask = class_mask[i]
         if test_mode:
             header = 'Test: [Task {}]'.format(i + 1)
             test_stats = evaluate(model=model, data_loader=data_loader[i]['test'], 
-                                device=device, task_id=i, class_mask=class_mask, args=args,header=header)
+                                device=device, task_id=i, class_mask=mask, args=args,header=header,til=True)
         else:
             header = 'VAL: [Task {}]'.format(i + 1)
             test_stats = evaluate(model=model, data_loader=data_loader[i]['val'], 
-                                device=device, task_id=i, class_mask=class_mask, args=args,header=header)
+                                device=device, task_id=i, class_mask=mask, args=args,header=header,til=False)
 
         stat_matrix[0, i] = test_stats['Acc@1']
         stat_matrix[1, i] = test_stats['Acc@5']
