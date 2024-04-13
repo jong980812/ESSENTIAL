@@ -189,7 +189,7 @@ class CLIP_custom(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, train=False,task_id =-1):
         B, C, T, H, W = x.shape #!  EX) Batch size(10), Channel(3), Frames(8), Height(224), Width(224)
         x = rearrange(x, 'b c t h w -> (b t) c h w')
         x = self.conv1(x)

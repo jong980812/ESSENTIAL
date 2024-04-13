@@ -14,7 +14,7 @@ import datetime
 from utils import NativeScalerWithGradNormCount as NativeScaler
 from pathlib import Path
 from utils import print_matrix_with_aligned_averages
-
+from utils import unfreeze_block
 
 def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, 
                     criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device, 
@@ -142,7 +142,15 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 utils.save_on_master(state_dict, checkpoint_path)
         #!************************ Rehearsal *************************************
         if args.memory_size > 0:
+            # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
+            # print(unfreeze_list)
+            # print('Freeze for rehearsal')
                    # lr scehdule
+            optimizer = create_optimizer(
+            args, model_without_ddp, skip_list=args.skip_weight_decay_list,
+            get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
+            get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
+            loss_scaler = NativeScaler()
             total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
             num_training_steps_per_epoch = len(data_loader[task_id]['rehearsal'].dataset) // total_batch_size
             if num_training_steps_per_epoch ==0:
@@ -175,7 +183,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             num_training_steps_per_epoch=num_training_steps_per_epoch, 
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
-                
+        # model, unfreeze_list = unfreeze_block(model,['head','Adapter'])  
+        # print(unfreeze_list)
+         
         if args.model=='AIM_expand':
             model.module.transformer.add_task()
         # # if task_id<19:
@@ -302,7 +312,7 @@ def train_one_epoch(model: torch.nn.Module,
             else:
                 mask = class_mask[task_id]
         #!!!각 마스크 첫번째 값 빼줘서 target 범위를 0~ 으로 맞춰줌.
-        if args.each_head:
+        if args.each_head and not rehearsal:
             first_class = mask[0]
             targets = targets-first_class
         #!!!
