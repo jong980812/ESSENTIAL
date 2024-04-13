@@ -117,6 +117,7 @@ class Transformer(nn.Module):
                 m2.requires_grad_(False)
         print('**Freeze previous adapter**')
         self.Adapter_pool.append(self.Adapters)
+    def make_new_adapter(self):
         self.Adapters = nn.ModuleList([
             nn.ModuleDict({
             'T':Adapter(self.width, skip_connect=False,dim_mlp=self.dim_mlp),
@@ -195,7 +196,6 @@ class AIM_expand(nn.Module):
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
-
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
 
         self.ln_post = LayerNorm(width)
@@ -281,6 +281,23 @@ class AIM_expand(nn.Module):
                             nn.init.constant_(m2.weight, 0)
                             nn.init.constant_(m2.bias, 0)
 
+    def head_scailing(self,first_task,class_per_task,task_id):
+        data=self.head.weight.clone().permute(1,0)
+        # 스케일링할 열 범위 설정
+        current=first_task+int(task_id-1*class_per_task)
+        # 스케일링할 열 범위 설정
+        cols_to_scale = data[:, first_task:first_task+task_id*class_per_task]  # (768, 6:12) 범위
+        cols_reference = data[:, 0:first_task]  # (768, 0:7) 범위, 이 범위에 맞추려고 함
+
+        # Norm 조정을 위한 함수 정의
+        
+
+        # Norm 조정 실행
+        adjusted_cols = adjust_norm(cols_to_scale, cols_reference)
+        # 조정된 열을 원본 데이터에 다시 삽입
+        #self.head.weight[current:,: ] = torch.nn.Parameter(adjusted_cols.permute(1,0))
+        data[:,first_task:first_task+task_id*class_per_task ] = adjusted_cols
+        self.head.weight = nn.Parameter(data.permute(1,0))
     @torch.jit.ignore
     def no_weight_decay(self):
         return {'absolute_pos_embed', 'temporal_embedding'}
@@ -289,7 +306,7 @@ class AIM_expand(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor,task_id=None):
+    def forward(self, x: torch.Tensor,task_id=None,selection_results=None):
         B, C, T, H, W = x.shape
         x = rearrange(x, 'b c t h w -> (b t) c h w')
         x = self.conv1(x)  
@@ -306,24 +323,46 @@ class AIM_expand(nn.Module):
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x,task_id) if task_id is not None else self.transformer(x)
+        if selection_results is not None:
+            x = rearrange(x, 'n (b t) d -> n b t d', b=B)
+            xs = []
+            for b in range(B):
+                x_ = self.transformer(x[:,b,:,:],selection_results[b])
+                xs.append(x_.unsqueeze(0))
+            x = torch.cat(xs,0)
+            x = rearrange(x, 'b n t d -> n (b t) d', b=B,t=T)
+        else:
+            x = self.transformer(x,task_id) if task_id is not None else self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
+        # x = x.mean(1)
+        
         
         x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
         
         if self.avg_pool is not None:
             x = self.avg_pool(x)
-        # [N, in_channels, 1, 1, 1]
+        # # [N, in_channels, 1, 1, 1]
         if self.dropout is not None:
             x = self.dropout(x)
-        # [N, in_channels, 1, 1, 1]
+        # # [N, in_channels, 1, 1, 1]
         x = x.view(x.shape[0], -1)
         # [N, in_channels]
         cls_score = self.head(x)
         # [N, num_classes]
         return cls_score
         
-   
+def adjust_norm(input_tensor, ref_tensor):
+    # input_tensor와 ref_tensor의 norm 계산
+    input_norm = input_tensor.norm(p=2, dim=0, keepdim=True)
+    ref_norm = ref_tensor.norm(p=2, dim=0, keepdim=True)
+
+    # ref_tensor의 평균 norm 계산
+    ref_mean_norm = ref_norm.mean()
+    
+    # input_tensor의 각 열을 조정하여 ref_mean_norm과 비슷하게 만듦
+    adjusted_tensor = input_tensor * (ref_mean_norm / input_norm)
+    
+    return adjusted_tensor

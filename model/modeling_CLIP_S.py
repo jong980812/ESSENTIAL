@@ -43,7 +43,7 @@ class QuickGELU(nn.Module):
 
 
 class ResidualAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192,adapter = False):
         super().__init__()
         self.attn = nn.MultiheadAttention(d_model, n_head)
         self.ln_1 = LayerNorm(d_model)
@@ -55,32 +55,39 @@ class ResidualAttentionBlock(nn.Module):
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.S_Adapter = Adapter(d_model,dim_mlp,skip_connect=True)
+        self.adapter = adapter
+        if self.adapter:
+            self.S_Adapter = Adapter(d_model,dim_mlp,skip_connect=False)
 
     def attention(self, x: torch.Tensor):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
     def forward(self, x: torch.Tensor):
-        x = x + self.S_Adapter(self.attention(self.ln_1(x)))
-        x = x + self.mlp(self.ln_2(x))
+        x = x + (self.attention(self.ln_1(x)))
+        xn = self.ln_2(x)
+        
+        if self.adapter:
+            x = x + self.mlp(xn) + 0.5*self.S_Adapter(xn)
+        else:
+            x  = x + self.mlp(xn)
         return x
 
 
 class Transformer(nn.Module):
-    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,dim_mlp=192):
+    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,dim_mlp=192,adapter_layers=None):
         super().__init__()
         self.width = width
         self.layers = layers
         dpr = [x.item() for x in torch.linspace(0, drop_path, self.layers)]
-        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp) for i in range(layers)])
+        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp,adapter=(i in adapter_layers)) for i in range(layers)])
 
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
 
 class CLIP_S(nn.Module):
     ## ViT definition in CLIP image encoder
-    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192):
+    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=None,class_mask=None):
         super().__init__()
         self.input_resolution = input_resolution
         self.pretrained = pretrained
@@ -92,20 +99,31 @@ class CLIP_S(nn.Module):
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
         self.ln_pre = LayerNorm(width)
 
-        self.num_frames = num_frames
+        self.num_frames =  num_frames
         # self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
 
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=adapter_layers)
 
         self.ln_post = LayerNorm(width)
-
+        multi_head = True
         embed_dim = 768
-        self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-        trunc_normal_(self.head.weight, std=.02)
-
-        self.init_weights(pretrained='clip')
-        self.head.weight.data.mul_(init_scale)
-        self.head.bias.data.mul_(init_scale)
+        if multi_head:
+            self.head = nn.ModuleList()
+            for mask in class_mask:
+                n_class = len(mask)
+                head= nn.Linear(embed_dim,n_class)
+                trunc_normal_(head.weight, std=.02)
+                self.head.append(head)
+            self.init_weights(pretrained='clip')
+            for head in self.head:
+                head.weight.data.mul_(init_scale)
+                head.bias.data.mul_(init_scale)
+        else:
+            self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+            trunc_normal_(head.weight, std=.02)
+            self.init_weights(pretrained='clip')
+            self.head.weight.data.mul_(init_scale)
+            self.head.bias.data.mul_(init_scale)
         self.dropout_ratio = dropout_ratio
         if self.dropout_ratio != 0:
             self.dropout = nn.Dropout(p=self.dropout_ratio)
@@ -168,7 +186,10 @@ class CLIP_S(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, train=False,task_id =-1):
+        # x = x[:,:,3,:,:].unsqueeze(2)
+        if len(x.shape)==4:
+            x = x.unsqueeze(2)
         B, C, T, H, W = x.shape #!  EX) Batch size(10), Channel(3), Frames(8), Height(224), Width(224)
         x = rearrange(x, 'b c t h w -> (b t) c h w')
         x = self.conv1(x)
@@ -197,9 +218,15 @@ class CLIP_S(nn.Module):
             x = self.dropout(x)
         # [N, in_channels, 1, 1, 1]
         x = x.view(x.shape[0], -1)
+        if train:
         # [N, in_channels]
-        cls_score = self.head(x)
+            cls_score = self.head[task_id](x)
+        else:
+            logits = [self.head[t](x) for t in range(task_id+1)]
+            cls_score = torch.cat(logits,1)
         # [N, num_classes]
         return cls_score
+
+
         
    

@@ -141,7 +141,7 @@ class Transformer(nn.Module):
 
 class AIM(nn.Module):
     ## ViT definition in CLIP image encoder
-    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[]):
+    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
         super().__init__()
         self.input_resolution = input_resolution
         self.pretrained = pretrained
@@ -159,14 +159,27 @@ class AIM(nn.Module):
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
 
         self.ln_post = LayerNorm(width)
-
         embed_dim = 768
-        self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-        trunc_normal_(self.head.weight, std=.02)
-
-        self.init_weights(pretrained='clip')
-        self.head.weight.data.mul_(init_scale)
-        self.head.bias.data.mul_(init_scale)
+        
+        #!!
+        self.each_head = args.each_head
+        if self.each_head:
+            self.head = nn.ModuleList()
+            for mask in class_mask:
+                n_class = len(mask)
+                head= nn.Linear(embed_dim,n_class)
+                trunc_normal_(head.weight, std=.02)
+                self.head.append(head)
+            self.init_weights(pretrained='clip')
+            for head in self.head:
+                head.weight.data.mul_(init_scale)
+                head.bias.data.mul_(init_scale)
+        else:
+            self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+            trunc_normal_(self.head.weight, std=.02)
+            self.init_weights(pretrained='clip')
+            self.head.weight.data.mul_(init_scale)
+            self.head.bias.data.mul_(init_scale)
         self.dropout_ratio = dropout_ratio
         if self.dropout_ratio != 0:
             self.dropout = nn.Dropout(p=self.dropout_ratio)
@@ -180,6 +193,20 @@ class AIM(nn.Module):
         
         
         
+    def head_scailing(self,first_task,class_per_task,task_id):
+        data=self.head.weight.clone().permute(1,0)
+        # 스케일링할 열 범위 설정
+        current=first_task+int(task_id-1*class_per_task)
+        # 스케일링할 열 범위 설정
+        cols_to_scale = data[:, first_task:first_task+task_id*class_per_task]  # (768, 6:12) 범위
+        cols_reference = data[:, 0:first_task]  # (768, 0:7) 범위, 이 범위에 맞추려고 함
+        # Norm 조정을 위한 함수 정의
+        # Norm 조정 실행
+        adjusted_cols = adjust_norm(cols_to_scale, cols_reference)
+        # 조정된 열을 원본 데이터에 다시 삽입
+        #self.head.weight[current:,: ] = torch.nn.Parameter(adjusted_cols.permute(1,0))
+        data[:,first_task:first_task+task_id*class_per_task ] = adjusted_cols
+        self.head.weight = nn.Parameter(data.permute(1,0))
         
     def init_weights(self, pretrained=None):
         def _init_weights(m):
@@ -249,20 +276,19 @@ class AIM(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor):
-        B, C, T, H, W = x.shape
+    def forward(self, x: torch.Tensor, train=False,task_id =-1):
+        # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
+        if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
+            x = x.unsqueeze(2)
+        B, C, T, H, W = x.shape 
         x = rearrange(x, 'b c t h w -> (b t) c h w')
-        x = self.conv1(x)  
+        x = self.conv1(x)
         x = x.reshape(x.shape[0], x.shape[1], -1) 
         x = x.permute(0, 2, 1)
+        
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
-        x = x + self.positional_embedding.to(x.dtype)
-
-        n = x.shape[1]
-        # x = rearrange(x, '(b t) n d -> (b n) t d', t=self.num_frames)
-        # x = x + self.temporal_embedding
-        # x = rearrange(x, '(b n) t d -> (b t) n d', n=n)
-            
+        #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
+        x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
@@ -281,9 +307,28 @@ class AIM(nn.Module):
             x = self.dropout(x)
         # [N, in_channels, 1, 1, 1]
         x = x.view(x.shape[0], -1)
+        
+        if not self.each_head:#* each head아니면 그냥 원래대로 return
+            cls_score = self.head(x)
+            return cls_score
+        if train:
         # [N, in_channels]
-        cls_score = self.head(x)
+            cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
+        else:
+            logits = [self.head[t](x) for t in range(task_id+1)]
+            cls_score = torch.cat(logits,1)
         # [N, num_classes]
         return cls_score
-        
-   
+    
+def adjust_norm(input_tensor, ref_tensor):
+    # input_tensor와 ref_tensor의 norm 계산
+    input_norm = input_tensor.norm(p=2, dim=0, keepdim=True)
+    ref_norm = ref_tensor.norm(p=2, dim=0, keepdim=True)
+
+    # ref_tensor의 평균 norm 계산
+    ref_mean_norm = ref_norm.mean()
+    
+    # input_tensor의 각 열을 조정하여 ref_mean_norm과 비슷하게 만듦
+    adjusted_tensor = input_tensor * (ref_mean_norm / input_norm)
+    
+    return adjusted_tensor

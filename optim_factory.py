@@ -28,8 +28,8 @@ def get_num_layer_for_vit(var_name, num_max_layer):
         return 0
     elif var_name.startswith("rel_pos_bias"):
         return num_max_layer - 1
-    elif var_name.startswith("blocks"):
-        layer_id = int(var_name.split('.')[1])
+    elif var_name.startswith("transformer.resblocks"):
+        layer_id = int(var_name.split('.')[2])
         return layer_id + 1
     else:
         return num_max_layer - 1
@@ -56,9 +56,6 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
         if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
             group_name = "no_decay"
             this_weight_decay = 0.
-        elif 'transformer' in name and slow_learner:
-            group_name = 'slow'
-            this_weight_decay = weight_decay
         else:
             group_name = "decay"
             this_weight_decay = weight_decay

@@ -14,13 +14,13 @@ from functools import partial
 from pathlib import Path
 from collections import OrderedDict
 import model.modeling_finetune
-
+import pickle
 from mixup import Mixup
 from timm.models import create_model
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.utils import ModelEma
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
-
+from image_continual import build_image_dataloader
 from datasets_cil import build_continual_dataloader
 from utils import NativeScalerWithGradNormCount as NativeScaler
 from utils import  multiple_samples_collate
@@ -38,6 +38,22 @@ from model.modeling_AIM_expand_adapter import AIM_expand
 import model.modelling_vmae
 
 import random
+def get_class_mask(args):
+    with open(args.anno_path, 'rb') as file:
+        anno_list = pickle.load(file)
+    classes_per_task = []
+    for i in range(args.num_tasks):
+        if i == 0:
+            classes_per_task.append(len(anno_list['train'][i].keys()))
+        else:
+            classes_per_task.append(len(anno_list['train'][i].keys())+classes_per_task[i-1])
+    class_mask  = []
+    for i in range(args.num_tasks):
+        if i == 0:
+            class_mask.append(list(range(0,classes_per_task[i])))
+        else:
+            class_mask.append(list(range(classes_per_task[i-1],classes_per_task[i])))
+    return class_mask
 def get_args_cil():
     parser = argparse.ArgumentParser('VideoMAE fine-tuning and evaluation script for video classification', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -162,7 +178,7 @@ def get_args_cil():
     parser.add_argument('--num_segments', type=int, default= 1)
     parser.add_argument('--num_frames', type=int, default= 16)
     parser.add_argument('--sampling_rate', type=int, default= 4)
-    parser.add_argument('--data_set', default='ActivityNet', choices=['Kinetics-400', 'ActivityNet', 'SSV2','UCF101'],
+    parser.add_argument('--data_set', default='ActivityNet', choices=['Kinetics-400', 'ActivityNet', 'SSV2','UCF101','CIFAR100'],
                         type=str, help='dataset')
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
@@ -235,6 +251,7 @@ def get_args_cil():
     
     
     parser.add_argument('--cross', action='store_true', default=False, help='')
+    parser.add_argument('--each_head', action='store_true', default=False, help='')
     parser.add_argument('--joint', action='store_true', default=False, help='')
     parser.add_argument('--slow_learner', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
@@ -274,6 +291,8 @@ def main(args, ds_init):
         args.nb_classes = 174
     elif args.data_set == 'UCF101':
         args.nb_classes = 101
+    elif args.data_set == 'CIFAR100':
+        args.nb_classes = 100
     else:
         raise ValueError('Unsupported dataset')
     args.n_videos = []
@@ -295,6 +314,7 @@ def main(args, ds_init):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
+    class_mask = get_class_mask(args)#! 모델에서 head 만들기 위해 미리 가져옴.
 
 
     if args.model == 'AIM':
@@ -310,13 +330,18 @@ def main(args, ds_init):
             num_classes=args.nb_classes,
             dim_mlp=args.dim_mlp,
             init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers
+            adapter_layers=args.adapter_layers,
+            class_mask=class_mask,
+            args=args
         )
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
+        # check = torch.load('/data/jong980812/project/cil/videoCIL/result/debugging/k400/OUT/checkpoint/task20_checkpoint.pth','cpu')['model']
+        # print(model.load_state_dict(check))
+        
     elif args.model == 'AIM_prev':
         model = AIM_prev(
             input_resolution=224,
@@ -353,11 +378,16 @@ def main(args, ds_init):
             init_scale=args.init_scale,
             adapter_layers=args.adapter_layers
         )
+
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
+
+        model.eval()
+        
+        
     elif args.model == 'CLIP':
         model = CLIP(
             input_resolution=224,
@@ -408,7 +438,9 @@ def main(args, ds_init):
             adapter_scale=0.5,
             num_classes=args.nb_classes,
             dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale
+            init_scale=args.init_scale,
+            adapter_layers=args.adapter_layers,
+            class_mask = class_mask
         )
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -533,11 +565,17 @@ def main(args, ds_init):
 
 
 
+    # if args.layer_decay < 1.0:
+    #     assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
+    # else:
+    #     assigner = None
+
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
+    elif args.slow_learner:
+        assigner = LayerDecayValueAssigner([0.01]*(len(args.adapter_layers)+1)+[1.0]) # backbone + head
     else:
         assigner = None
-
     if assigner is not None:
         print("Assigned values = %s" % str(assigner.values))
 
@@ -577,7 +615,12 @@ def main(args, ds_init):
     print("criterion = %s" % str(criterion))
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    data_loader, class_mask,n_vids,_ = build_continual_dataloader(args)
+
+    if args.data_set == 'CIFAR100':
+        args.data_set = 'Split-CIFAR100'
+        data_loader, class_mask,n_vids,_ =build_image_dataloader(args)
+    else:
+        data_loader, class_mask,n_vids,_ = build_continual_dataloader(args)
  #!************ Information *************
     print()
     print("="*40)

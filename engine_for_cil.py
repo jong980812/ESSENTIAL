@@ -54,7 +54,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         print(f"Start task training for {epochs} epochs")
         #TODO pick best model using validation
         max_accuracy = 0.0
-
+        # if task_id== 0:
+        #     model.module.transformer.add_task()
+        #     continue
         if task_id > 0:
             # reinit_optimizer
             if loss_scaler is None:
@@ -81,25 +83,32 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.to(args.device)
                     model_without_ddp = model.module
                 # model.module.transformer_for_cls.initial_adapter()
-                model.module.transformer.add_task()
-                model.to(args.device)
+                # model.module.transformer.add_task()
+                elif args.model=='AIM_expand':
+                    model.module.transformer.make_new_adapter()
+                    model.to(args.device)
                 
-                # model.module.transformer.transfer_c_to_p()
-                # model.module.transformer.set_first(False)
                 optimizer = create_optimizer(
                 args, model_without_ddp, skip_list=args.skip_weight_decay_list,
                 get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
                 get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
                 loss_scaler = NativeScaler()
-        # if task_id < 20:
-        #     continue
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
         print('****Up Projection weight****')
         # print(model.module.transformer.resblocks[5].T_Adapter.D_fc2.weight[:20,0])
-        # if task_id<4:
-            # continue
+        # if task_id<19:
+        #     continue
         #!************************ Traininig *************************************
+        Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
+        checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_start_checkpoint.pth'.format(task_id+1))
+
+        state_dict = {
+                    'model': model_without_ddp.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'args': args,
+                }
+        utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
             # break
             # if epoch == epochs-5 and task_id>0:
@@ -115,7 +124,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                         lr_schedule_values=lr_schedule_values, 
                                         wd_schedule_values=wd_schedule_values,
                                         num_training_steps_per_epoch=num_training_steps_per_epoch, 
-                                        update_freq=args.update_freq, header= header,loss_scaler=loss_scaler
+                                        update_freq=args.update_freq, header= header,loss_scaler=loss_scaler,rehearsal=False
                                         )
 
 
@@ -167,7 +176,31 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
                 
-    
+        if args.model=='AIM_expand':
+            model.module.transformer.add_task()
+        # # if task_id<19:
+        # #     continue
+        # if task_id >0:
+        #     model.module.head_scailing(len(class_mask[0]),len(class_mask[task_id]),task_id)
+        # check = torch.load('/data/jong980812/project/cil/videoCIL/result/AIM_expand/head_scailing/ucf20/OUT/checkpoint/task20_checkpoint.pth','cpu')['model']
+        # print(model.module.load_state_dict(check))
+        # # model.eval()
+        # if utils.is_main_process():
+        #     prev  =torch.load(os.path.join(args.output_dir, 'checkpoint/task{}_epoch_start_checkpoint.pth'.format(task_id+1)))['model']
+        #     current = model_without_ddp.state_dict()
+        #     for name in ['D_fc2','D_fc1']:
+        #         for i in range(12):
+        #             prev_adapter= prev[f'transformer.resblocks.{i}.S_Adapter.{name}.weight']
+        #             current_adapter= current[f'transformer.resblocks.{i}.S_Adapter.{name}.weight']
+        #             result = torch.where(torch.abs(current_adapter-prev_adapter) > torch.abs(current_adapter-prev_adapter).mean(0), current_adapter, prev_adapter)
+        #             current[f'transformer.resblocks.{i}.S_Adapter.{name}.weight']=result
+        #             prev_adapter= prev[f'transformer.resblocks.{i}.S_Adapter.{name}.bias']
+        #             current_adapter= current[f'transformer.resblocks.{i}.S_Adapter.{name}.bias']
+        #             result = torch.where(torch.abs(current_adapter-prev_adapter) > torch.abs(current_adapter-prev_adapter).mean(0), current_adapter, prev_adapter)
+        #             current[f'transformer.resblocks.{i}.S_Adapter.{name}.bias']=result
+            # print(model.module.load_state_dict(current))
+            # model.to(args.device)
+            
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         acc_list.append(val_stats['stat_matrix'].tolist())
@@ -198,8 +231,18 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
     
-    model.module.transformer.add_task()
         
+
+    if args.output_dir and utils.is_main_process():
+        Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
+        
+        checkpoint_path = os.path.join(args.output_dir, 'checkpoint/last_task{}_checkpoint.pth'.format(task_id+1))
+        state_dict = {
+                'model': model_without_ddp.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'epoch': epoch,
+                'args': args,
+            }
     print('test')
     evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                 task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
@@ -231,7 +274,7 @@ def train_one_epoch(model: torch.nn.Module,
     header = header
     print_freq = 10
 
-    for data_iter_step, (samples, targets, _, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (samples, targets,_,_) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue
@@ -241,32 +284,39 @@ def train_one_epoch(model: torch.nn.Module,
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:
                     param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
-                    if i==0 and args.slow_learner:
-                        param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]/100
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
         samples = samples.to(device, non_blocking=True)
+        # for class_index, classes in enumerate(class_mask):
+        #     for c in classes:
+        #         targets[targets == c] = class_index
         targets = targets.to(device, non_blocking=True)
+        
         mask = None
         if class_mask is not None:
             if rehearsal:
                 mask = []
                 for i in range(task_id+1):
                     mask+=class_mask[i]
+                    # mask.append(i)
             else:
                 mask = class_mask[task_id]
-       
+        #!!!각 마스크 첫번째 값 빼줘서 target 범위를 0~ 으로 맞춰줌.
+        if args.each_head:
+            first_class = mask[0]
+            targets = targets-first_class
+        #!!!
         if args.mixup_fn is not None:
             samples, targets = args.mixup_fn(samples, targets)
             
         if loss_scaler is None:
             samples = samples.half()
             loss, output = train_class_batch(
-            model, samples, targets, criterion,mask,args,device)
+            model, samples, targets, criterion,mask,task_id,args,device)
         else:
             with torch.cuda.amp.autocast():
                 loss, output = train_class_batch(
-                model, samples, targets, criterion,mask,args,device)
+                model, samples, targets, criterion,mask,task_id,args,device)
 
         loss_value = loss.item()
 
@@ -325,11 +375,12 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def train_class_batch(model, samples, target, criterion,mask,args,device):
+def train_class_batch(model, samples, target, criterion,mask,task_id,args,device):
     
-
-    outputs = model(samples)
-    if mask is not None:
+    # if args.each_head:
+    # first_class = mask[0]
+    outputs = model(samples,train=True,task_id=task_id)
+    if (mask is not None) and (not args.each_head): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
         outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
@@ -337,6 +388,7 @@ def train_class_batch(model, samples, target, criterion,mask,args,device):
         # TODO mixup
         # outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-1e4'))
         # target = target.index_fill(dim=1, index=not_mask, value=int(0))
+    target = target#-first_class
     loss = criterion(outputs, target)
     return loss, outputs
 
@@ -352,11 +404,12 @@ def get_loss_scale_for_deepspeed(model):
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module,  data_loader, 
-            device, task_id=-1, class_mask=None, args=None,header=None,til=False):
+            device, task_id=-1,all_mask = None, class_mask=None, args=None,header=None,til=False
+            ,selector = None):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
-
+    
     # switch to evaluation mode
     model.eval()
 
@@ -365,12 +418,17 @@ def evaluate(model: torch.nn.Module,  data_loader,
             videos = batch[0]
             target = batch[1]            
             videos = videos.to(device, non_blocking=True)
+                # for class_index, classes in enumerate(all_mask):
+                #     for c in classes:
+                #         target[target == c] = class_index
             target = target.to(device, non_blocking=True)
 
             # compute output
 
             with torch.cuda.amp.autocast():
-                logits = model(videos,task_id) if til  else model(videos)
+                # selection = selector(videos)
+                # selection_results = selection.argmax(1)#(B)
+                logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
                 # if til:
                 #     not_mask = np.setdiff1d(np.arange(args.nb_classes), class_mask)
                 #     not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
@@ -395,19 +453,19 @@ def evaluate(model: torch.nn.Module,  data_loader,
 def evaluate_till_now(model: torch.nn.Module, data_loader, 
                     device, task_id=-1, class_mask=None, acc_matrix=None, args=None,test_mode=False):
     stat_matrix = np.zeros((3, args.num_tasks)) # 3 for Acc@1, Acc@5, Loss
-    print('eval')
     import random
     num_task = args.num_tasks
     for i in range(task_id+1):
+        #! til은 adapter selection 하기 위함.
         mask = class_mask[i]
         if test_mode:
             header = 'Test: [Task {}]'.format(i + 1)
             test_stats = evaluate(model=model, data_loader=data_loader[i]['test'], 
-                                device=device, task_id=i, class_mask=mask, args=args,header=header,til=True)
+                                device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
         else:
             header = 'VAL: [Task {}]'.format(i + 1)
             test_stats = evaluate(model=model, data_loader=data_loader[i]['val'], 
-                                device=device, task_id=i, class_mask=mask, args=args,header=header,til=False)
+                                device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
 
         stat_matrix[0, i] = test_stats['Acc@1']
         stat_matrix[1, i] = test_stats['Acc@5']
