@@ -14,12 +14,11 @@ import copy
 class SSVideoClsDataset(Dataset):
     """Load your own video classification dataset."""
 
-    def __init__(self, anno_list, data_path, mode='train', clip_len=8,
+    def __init__(self, anno_path, data_path, mode='train', clip_len=8,
                 crop_size=224, short_side_size=256, new_height=256,
                 new_width=340, keep_aspect_ratio=True, num_segment=1,
-                num_crop=1, test_num_segment=10, test_num_crop=3, args=None,task_id =-1,
-                 loader='decord',rehearsal=False,return_text=False):
-        self.anno_list = anno_list
+                num_crop=1, test_num_segment=10, test_num_crop=3, args=None):
+        self.anno_path = anno_path
         self.data_path = data_path
         self.mode = mode
         self.clip_len = clip_len
@@ -35,60 +34,17 @@ class SSVideoClsDataset(Dataset):
         self.args = args
         self.aug = False
         self.rand_erase = False
-        self.return_text=False
-        
         if self.mode in ['train']:
             self.aug = True
             if self.args.reprob > 0:
                 self.rand_erase = True
         if VideoReader is None:
             raise ImportError("Unable to import `decord` which is required to read videos.")
-        self.label_array = []
-        self.dataset_samples = []
-        self.label_name_array = []
-        if not rehearsal:
-            for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
-                for video_info in videos:
-                    if task_id == 0:
-                        self.label_array.append(label_num )
-                    else:
-                        self.label_array.append(label_num + args.classes_per_task[task_id-1])
-                    self.dataset_samples.append(video_info)
-                    self.label_name_array.append(label_name)
 
-        else:
-            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
-                args.memory_video_path = json.load(file)
-            self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
-            self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
-            self.mode ='train'
-
-
-
-        if utils.is_main_process() and mode == 'train' and  args.memory_size>0 and not rehearsal:
-            # save video in rehearsal
-            if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
-                args.memory_video_path['dataset_samples'] += self.dataset_samples
-                args.memory_video_path['label_array'] += self.label_array
-            else:
-                need_size = int(args.memory_size / (task_id + 1))
-                m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
-                indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
-
-                selected_indices = random.sample(range(len(self.label_array)), need_size)
-                selected_labels = [self.label_array[i] for i in selected_indices]
-                selected_samples = [self.dataset_samples[i] for i in selected_indices]
-                label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
-                dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
-
-                args.memory_video_path['dataset_samples'] = dataset_samples
-                args.memory_video_path['label_array'] = label_array
-            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
-                json.dump(args.memory_video_path, file)
-
-        assert len(args.memory_video_path['label_array']) <= args.memory_size
         import pandas as pd
-
+        cleaned = pd.read_csv(self.anno_path, header=None, delimiter=' ')
+        self.dataset_samples = list(cleaned.values[:, 0])
+        self.label_array = list(cleaned.values[:, 1])
 
         if (mode == 'train'):
             pass
@@ -120,8 +76,17 @@ class SSVideoClsDataset(Dataset):
                         self.test_label_array.append(sample_label)
                         self.test_dataset.append(self.dataset_samples[idx])
                         self.test_seg.append((ck, cp))
-
-
+    def get_video(self,path,label=0):
+        sample = path
+        buffer = self.loadvideo_decord(sample)
+        if len(buffer) == 0:
+            while len(buffer) == 0:
+                warnings.warn("video {} not correctly loaded during validation".format(sample))
+                index = np.random.randint(self.__len__())
+                sample = self.dataset_samples[index]
+                buffer = self.loadvideo_decord(sample)
+        buffer = self.data_transform(buffer)
+        return buffer, label
     def __getitem__(self, index):
         if self.mode == 'train':
             args = self.args 
@@ -151,7 +116,7 @@ class SSVideoClsDataset(Dataset):
                 buffer = self._aug_frame(buffer, args)
             
             return buffer, self.label_array[index], index, {}
-
+        
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
             buffer = self.loadvideo_decord(sample)
@@ -181,8 +146,13 @@ class SSVideoClsDataset(Dataset):
             if isinstance(buffer, list):
                 buffer = np.stack(buffer, 0)
 
-            spatial_step = 1.0 * (max(buffer.shape[1], buffer.shape[2]) - self.short_side_size) \
-                                / (self.test_num_crop - 1)
+            # fix bug (test_crop수가 1 일때 zero division이 발생하는 error debug)
+            if self.test_num_crop == 1:
+                spatial_step = 1.0 * (max( buffer.shape[1], buffer.shape[2]) - self.short_side_size) \
+                                    / (self.test_num_crop)
+            else:
+                spatial_step = 1.0 * (max( buffer.shape[1], buffer.shape[2]) - self.short_side_size) \
+                                    / (self.test_num_crop - 1)
             temporal_start = chunk_nb # 0/1
             spatial_start = int(split_nb * spatial_step)
             if buffer.shape[1] >= buffer.shape[2]:
@@ -262,7 +232,8 @@ class SSVideoClsDataset(Dataset):
 
     def loadvideo_decord(self, sample, sample_rate_scale=1):
         """Load video content using Decord"""
-        fname = os.path.join(self.data_path,sample)
+        fname = sample
+
         if not (os.path.exists(fname)):
             return []
 
@@ -279,7 +250,7 @@ class SSVideoClsDataset(Dataset):
         except:
             print("video cannot be loaded by decord: ", fname)
             return []
-
+        
         if self.mode == 'test':
             all_index = []
             tick = len(vr) / float(self.num_segment)

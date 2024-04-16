@@ -29,14 +29,14 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     for task_id in range(args.num_tasks):
         # SSv2 초반 epoch을 위해 만들어놓았지만, 현재 사용 안함.
         if task_id == 0 and args.data_set == "SSV2":
-            warmup_epochs,epochs = args.warmup_epochs//2,args.epochs//2
+            warmup_epochs,epochs = args.warmup_epochs,args.epochs
         else:
             warmup_epochs,epochs = args.warmup_epochs,args.epochs
             
         print(f'task {task_id+1}/{args.num_tasks}')
         start_time = time.time()
         
-       # lr scehdule
+        #lr scehdule
         total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
         num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
         print("Use step level LR scheduler!")
@@ -86,6 +86,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 # model.module.transformer.add_task()
                 elif args.model=='AIM_expand':
                     model.module.transformer.make_new_adapter()
+                    model.to(args.device)
+                elif args.model=='AIM_custom':
+                    model.module.unfreeze(['transformer_for_cls','head'])
                     model.to(args.device)
                 
                 optimizer = create_optimizer(
@@ -140,8 +143,11 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                             'args': args,
                         }
                 utils.save_on_master(state_dict, checkpoint_path)
+        #! Saving CLS TOken
+        
+        #!
         #!************************ Rehearsal *************************************
-        if args.memory_size > 0:
+        if args.memory_size > 0:# and task_id > 0:
             # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
             # print(unfreeze_list)
             # print('Freeze for rehearsal')
@@ -240,7 +246,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
-    
+
         
 
     if args.output_dir and utils.is_main_process():
@@ -606,3 +612,9 @@ def compute_video(lst):
     top1 = (int(pred) == int(label)) * 1.0
     top5 = (int(label) in np.argsort(-feat)[:5]) * 1.0
     return [pred, top1, top5, int(label)]
+
+
+
+
+
+

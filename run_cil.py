@@ -36,8 +36,9 @@ from model.modeling_AIM_prev import AIM_prev
 from model.modeling_CLIP_custom import CLIP_custom
 from model.modeling_AIM_expand_adapter import AIM_expand
 from model.modeling_AIM_crossadapter import AIM_attn_adapter
+from model.modeling_AIM_custom import AIM_custom
 import model.modelling_vmae
-
+import genetic
 import random
 def get_class_mask(args):
     with open(args.anno_path, 'rb') as file:
@@ -340,6 +341,31 @@ def main(args, ds_init):
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
+    elif args.model == 'AIM_custom':
+        model = AIM_custom(
+            input_resolution=224,
+            patch_size=16,
+            num_frames=args.num_frames,
+            width=768,
+            layers=12,
+            heads=12,
+            drop_path_rate=0.2,
+            adapter_scale=0.5,
+            num_classes=args.nb_classes,
+            dim_mlp=args.dim_mlp,
+            init_scale=args.init_scale,
+            adapter_layers=args.adapter_layers,
+            class_mask=class_mask,
+            args=args
+        )
+        num_layers = model.layers
+        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if args.unfreeze_layers is not None:
+            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+            print('unfreeze list :', unfreeze_list)
+        # check = torch.load('/data/jong980812/project/cil/videoCIL/result/lp/ssv2/AIM/109_dim1_50epoch_24/OUT/checkpoint/task10_epoch_50_checkpoint.pth','cpu')['model']
+        # print(model.load_state_dict(check))
+            
     elif args.model == 'AIM_attn_adapter':
         model = AIM_attn_adapter(
             input_resolution=224,
@@ -508,10 +534,10 @@ def main(args, ds_init):
             if checkpoint_model is None:
                 checkpoint_model = checkpoint
             state_dict = model.state_dict()
-            for k in ['head.weight', 'head.bias']:
-                if k in checkpoint_model:# and checkpoint_model[k].shape != state_dict[k].shape:
-                    print(f"Removing key {k} from pretrained checkpoint")
-                    del checkpoint_model[k]
+            # for k in ['head.weight', 'head.bias']:
+            #     if k in checkpoint_model:# and checkpoint_model[k].shape != state_dict[k].shape:
+            #         print(f"Removing key {k} from pretrained checkpoint")
+            #         del checkpoint_model[k]
 
             all_keys = list(checkpoint_model.keys())
             new_dict = OrderedDict()
@@ -553,9 +579,6 @@ def main(args, ds_init):
                     checkpoint_model['pos_embed'] = new_pos_embed
 
             utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
-            if args.unfreeze_layers is not None:
-                model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-                print('unfreeze list :', unfreeze_list)
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
@@ -566,6 +589,9 @@ def main(args, ds_init):
     model_without_ddp = model
 
     print("Model = %s" % str(model_without_ddp))
+
+
+
 
 
 
@@ -644,6 +670,26 @@ def main(args, ds_init):
         data_loader, class_mask,n_vids,_ =build_image_dataloader(args)
     else:
         data_loader, class_mask,n_vids,_ = build_continual_dataloader(args)
+    print("****Genetic******")
+    # from dataset.ssv2 import SSVideoClsDataset
+    # genetic_dataset = SSVideoClsDataset(
+    #         anno_path='/data/jong980812/project/cil/videoCIL/data/ssv2/annotation/val.csv',
+    #         data_path='/',
+    #         mode='validation',
+    #         clip_len=1,
+    #         num_segment=args.num_frames,
+    #         test_num_segment=args.test_num_segment,
+    #         test_num_crop=args.test_num_crop,
+    #         num_crop=1,
+    #         keep_aspect_ratio=True,
+    #         crop_size=args.input_size,
+    #         short_side_size=args.short_side_size,
+    #         new_height=256,
+    #         new_width=320,
+    #         args=args)
+    # path = '/local_datasets/something-something/something-something-v2-mp4/95557.mp4'
+    # optimized_order = genetic.genetic_algorithm(genetic_dataset,path,172,model, 10, 384, 24,0.,args)
+    # print("최적화된 프레임 순서:", optimized_order)
  #!************ Information *************
     print()
     print("="*40)
