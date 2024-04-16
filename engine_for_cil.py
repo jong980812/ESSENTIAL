@@ -52,6 +52,10 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
         print(f"Start task training for {epochs} epochs")
+        if args.joint:
+            if task_id< args.num_tasks-1:
+                continue
+                
         #TODO pick best model using validation
         max_accuracy = 0.0
         # if task_id== 0:
@@ -113,6 +117,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
         utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
+            if args.joint:
+                break
             # break
             # if epoch == epochs-5 and task_id>0:
                 # model.module.transformer.set_first(False)
@@ -395,17 +401,21 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     
     # if args.each_head:
     # first_class = mask[0]
-    outputs = model(samples,train=True,task_id=task_id)
+    # outputs,x_final = model(samples,train=True,task_id=task_id)
+    outputs= model(samples,train=True,task_id=task_id)
     if (mask is not None) and (not args.each_head): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
         outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
-        
+    # B, T = x_final.shape[:2]
+    # t_label = torch.LongTensor(list(range(T))).unsqueeze(0).repeat(B,1).to(args.device)
+    # order_loss = criterion(x_final.view(B*T, -1), t_label.view(-1))
         # TODO mixup
         # outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-1e4'))
         # target = target.index_fill(dim=1, index=not_mask, value=int(0))
     target = target#-first_class
     loss = criterion(outputs, target)
+    # loss = loss + order_loss
     return loss, outputs
 
 

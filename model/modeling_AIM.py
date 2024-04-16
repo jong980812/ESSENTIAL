@@ -155,11 +155,13 @@ class AIM(nn.Module):
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
-
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
-
         self.ln_post = LayerNorm(width)
         embed_dim = 768
+        self.temp_head = nn.Linear(embed_dim, num_frames)
+        trunc_normal_(self.temp_head.weight, std=.02)
+        self.temp_head.weight.data.mul_(init_scale)
+        self.temp_head.bias.data.mul_(init_scale)
         
         #!!
         self.each_head = args.each_head
@@ -294,7 +296,8 @@ class AIM(nn.Module):
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_post(x)
+        x = self.ln_post(x)# BT N D
+        x_final = rearrange(x[:,1:],'(b t) n d -> b t n d',b=B,t=T)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
         
@@ -310,7 +313,7 @@ class AIM(nn.Module):
         
         if not self.each_head:#* each head아니면 그냥 원래대로 return
             cls_score = self.head(x)
-            return cls_score
+            return cls_score,self.temp_head(x_final.mean(2))
         if train:
         # [N, in_channels]
             cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
