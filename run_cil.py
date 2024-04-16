@@ -256,6 +256,7 @@ def get_args_cil():
     parser.add_argument('--each_head', action='store_true', default=False, help='')
     parser.add_argument('--joint', action='store_true', default=False, help='')
     parser.add_argument('--slow_learner', action='store_true', default=False, help='')
+    parser.add_argument('--order', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
     
 
@@ -341,6 +342,8 @@ def main(args, ds_init):
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
+        # check = torch.load('/data/jong980812/project/cil/videoCIL/result/lp/ssv2/AIM/109_dim1_50epoch_24/OUT/checkpoint/task10_epoch_50_checkpoint.pth','cpu')['model']
+        # print(model.load_state_dict(check))
     elif args.model == 'AIM_custom':
         model = AIM_custom(
             input_resolution=224,

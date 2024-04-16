@@ -401,21 +401,25 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     
     # if args.each_head:
     # first_class = mask[0]
-    # outputs,x_final = model(samples,train=True,task_id=task_id)
-    outputs= model(samples,train=True,task_id=task_id)
+    if args.order:
+        outputs,x_final = model(samples,train=True,task_id=task_id)
+    else:
+        outputs= model(samples,train=True,task_id=task_id)
     if (mask is not None) and (not args.each_head): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
         outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
-    # B, T = x_final.shape[:2]
-    # t_label = torch.LongTensor(list(range(T))).unsqueeze(0).repeat(B,1).to(args.device)
-    # order_loss = criterion(x_final.view(B*T, -1), t_label.view(-1))
+    if args.order:
+        B, T = x_final.shape[:2]
+        t_label = torch.LongTensor(list(range(T))).unsqueeze(0).repeat(B,1).to(args.device)
+        order_loss = criterion(x_final.view(B*T, -1), t_label.view(-1))
         # TODO mixup
         # outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-1e4'))
         # target = target.index_fill(dim=1, index=not_mask, value=int(0))
     target = target#-first_class
     loss = criterion(outputs, target)
-    # loss = loss + order_loss
+    if args.order:
+        loss = loss + order_loss
     return loss, outputs
 
 
@@ -454,7 +458,11 @@ def evaluate(model: torch.nn.Module,  data_loader,
             with torch.cuda.amp.autocast():
                 # selection = selector(videos)
                 # selection_results = selection.argmax(1)#(B)
-                logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
+                if args.order:
+                    logits,_ = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
+                else:
+                    logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
+                       
                 # if til:
                 #     not_mask = np.setdiff1d(np.arange(args.nb_classes), class_mask)
                 #     not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
