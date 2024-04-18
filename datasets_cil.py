@@ -34,6 +34,11 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
             data_path = os.path.join('/local_datasets/kinetics400_320p' ,'val')
             if not os.path.isdir(data_path):
                 data_path = '/data2/local_datasets/Kinetics-400/videos_val'
+            if rehearsal:
+                data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
+                if not os.path.isdir(data_path):
+                    data_path = '/data2/local_datasets/Kinetics-400/videos_train'
+                
         dataset = KineticsDataset(
             anno_list=anno_list,
             data_path=data_path,
