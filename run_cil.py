@@ -471,7 +471,8 @@ def main(args, ds_init):
             adapter_scale=0.5,
             num_classes=args.nb_classes,
             dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale
+            init_scale=args.init_scale,
+            args = args
         )
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)

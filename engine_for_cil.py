@@ -180,7 +180,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
             print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
-            
+            print("Backbone Freeze")
+            model.module.transformer.eval()
+            model.module.conv1.eval()
             for epoch in range(args.rehearsal_epochs): 
                 if args.distributed:
                     data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
@@ -195,6 +197,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             num_training_steps_per_epoch=num_training_steps_per_epoch, 
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
+            model.module.train()
         # model, unfreeze_list = unfreeze_block(model,['head','Adapter'])  
         # print(unfreeze_list)
          
@@ -404,7 +407,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     if args.order:
         outputs,x_final = model(samples,train=True,task_id=task_id)
     else:
-        outputs= model(samples,train=True,task_id=task_id)
+        outputs,_= model(samples,train=True,task_id=task_id)
     if (mask is not None) and (not args.each_head): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
@@ -458,10 +461,10 @@ def evaluate(model: torch.nn.Module,  data_loader,
             with torch.cuda.amp.autocast():
                 # selection = selector(videos)
                 # selection_results = selection.argmax(1)#(B)
-                if args.order:
-                    logits,_ = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
-                else:
-                    logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
+                # if args.order:
+                logits,_ = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
+                # else:
+                # logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
                        
                 # if til:
                 #     not_mask = np.setdiff1d(np.arange(args.nb_classes), class_mask)

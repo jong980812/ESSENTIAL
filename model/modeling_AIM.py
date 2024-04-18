@@ -158,7 +158,9 @@ class AIM(nn.Module):
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         self.ln_post = LayerNorm(width)
         embed_dim = 768
-        self.temp_head = nn.Linear(embed_dim, num_frames)
+        self.order = args.order
+        if self.order:
+            self.temp_head = nn.Linear(embed_dim, num_frames)
         trunc_normal_(self.temp_head.weight, std=.02)
         self.temp_head.weight.data.mul_(init_scale)
         self.temp_head.bias.data.mul_(init_scale)
@@ -313,7 +315,7 @@ class AIM(nn.Module):
         
         if not self.each_head:#* each head아니면 그냥 원래대로 return
             cls_score = self.head(x)
-            return cls_score,self.temp_head(x_final.mean(2))
+            return cls_score,(self.temp_head(x_final.mean(2)) if self.order else None)
         if train:
         # [N, in_channels]
             cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.

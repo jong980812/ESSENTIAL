@@ -31,6 +31,9 @@ def get_num_layer_for_vit(var_name, num_max_layer):
     elif var_name.startswith("transformer.resblocks"):
         layer_id = int(var_name.split('.')[2])
         return layer_id + 1
+    elif var_name.startswith("transformer_for_cls"):
+        layer_id = 11
+        return layer_id
     else:
         return num_max_layer - 1
 

@@ -22,12 +22,18 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
         if is_train is True:
             mode = 'train'
             data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
+            if not os.path.isdir(data_path):
+                data_path = '/data2/local_datasets/Kinetics-400/videos_train'
         elif test_mode is True:
             mode = 'validation'
             data_path = os.path.join('/local_datasets/kinetics400_320p' ,'test')
+            if not os.path.isdir(data_path):
+                data_path = '/data2/local_datasets/Kinetics-400/videos_test'
         else:  
             mode = 'validation'
             data_path = os.path.join('/local_datasets/kinetics400_320p' ,'val')
+            if not os.path.isdir(data_path):
+                data_path = '/data2/local_datasets/Kinetics-400/videos_val'
         dataset = KineticsDataset(
             anno_list=anno_list,
             data_path=data_path,
@@ -191,7 +197,7 @@ def build_continual_dataloader(args):
             dataset_test = build_dataset(is_train=False, test_mode=True, args=args,anno_list=anno_list['test'][i],task_id=i)
         if args.memory_size > 0:
             torch.distributed.barrier()
-            dataset_rehearsal = build_dataset(is_train=True, test_mode=False, args=args,anno_list=None,task_id=i,rehearsal = True)
+            dataset_rehearsal = build_dataset(is_train=False, test_mode=False, args=args,anno_list=None,task_id=i,rehearsal = True)
             torch.distributed.barrier()
 
 
