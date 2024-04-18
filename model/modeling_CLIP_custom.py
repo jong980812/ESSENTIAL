@@ -122,6 +122,7 @@ class CLIP_custom(nn.Module):
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.order = args.order
+        embed_dim = 768
         if self.order:
             self.temp_head = nn.Linear(embed_dim, num_frames)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp)
@@ -129,7 +130,6 @@ class CLIP_custom(nn.Module):
         # print(self.transformer_for_cls.load_state_dict(self.transformer.resblocks[-1].state_dict(),strict=False))
         self.ln_post = LayerNorm(width)
 
-        embed_dim = 768
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         trunc_normal_(self.head.weight, std=.02)
 

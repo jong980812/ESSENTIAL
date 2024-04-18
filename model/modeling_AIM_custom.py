@@ -182,12 +182,14 @@ class AIM_custom(nn.Module):
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
-
+        self.order = args.order
+        embed_dim = 768
+        if self.order:
+            self.temp_head = nn.Linear(embed_dim, num_frames)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
 
         self.ln_post = LayerNorm(width)
-        embed_dim = 768
         
         #!!
         self.each_head = args.each_head
@@ -334,11 +336,12 @@ class AIM_custom(nn.Module):
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x[:, 0]
-        x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
-        #
-        x = rearrange(x, 'b d t -> t b d',b=B,t=T)
+        x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
+        x = x + self.temporal_embedding
+        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         x = self.transformer_for_cls(x)+x
         x = rearrange(x, 't b d -> b d t',b=B,t=T)
+        x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
         #
         x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
         
@@ -352,7 +355,7 @@ class AIM_custom(nn.Module):
         
         if not self.each_head:#* each head아니면 그냥 원래대로 return
             cls_score = self.head(x)
-            return cls_score,None
+            return cls_score,(self.temp_head(x_final))
         if train:
         # [N, in_channels]
             cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
