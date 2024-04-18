@@ -154,6 +154,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         #!
         #!************************ Rehearsal *************************************
         if args.memory_size > 0:# and task_id > 0:
+
             # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
             # print(unfreeze_list)
             # print('Freeze for rehearsal')
@@ -183,7 +184,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             print("Backbone Freeze")
             model.module.transformer.eval()
             model.module.conv1.eval()
-            for epoch in range(args.rehearsal_epochs): 
+            for epoch in range(args.rehearsal_epochs):
+                if (args.data_set=='SSV2') and (task_id==0):
+                    break 
                 if args.distributed:
                     data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
                 header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'
