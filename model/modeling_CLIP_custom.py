@@ -120,7 +120,7 @@ class CLIP_custom(nn.Module):
         self.ln_pre = LayerNorm(width)
 
         self.num_frames = num_frames
-        # self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
+        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.order = args.order
         if self.order:
             self.temp_head = nn.Linear(embed_dim, num_frames)
@@ -198,7 +198,7 @@ class CLIP_custom(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'absolute_pos_embed'}#, 'temporal_embedding'}
+        return {'absolute_pos_embed', 'temporal_embedding'}
 
     @torch.jit.ignore
     def no_weight_decay_keywords(self):
@@ -222,9 +222,9 @@ class CLIP_custom(nn.Module):
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x[:, 0]
-        x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
-        #
-        x = rearrange(x, 'b d t -> t b d',b=B,t=T)
+        x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
+        x = x + self.temporal_embedding
+        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         x = self.transformer_for_cls(x)+x
         x = rearrange(x, 't b d -> b d t',b=B,t=T)
         x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
