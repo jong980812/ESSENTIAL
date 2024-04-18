@@ -50,6 +50,7 @@ class KineticsDataset(Dataset):
         self.test_num_crop = test_num_crop
         self.args = args
         self.aug = False
+        self.rehearsal=rehearsal
         self.rand_erase = False
         self.return_text=False
         if loader == 'decord':
@@ -180,7 +181,7 @@ class KineticsDataset(Dataset):
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample)
+            buffer = self.loadvideo_decord(sample,self.rehearsal)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -288,7 +289,7 @@ class KineticsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, sample_rate_scale=1):
+    def loadvideo_decord(self, sample,rehearsal=False, sample_rate_scale=1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
 
@@ -329,7 +330,11 @@ class KineticsDataset(Dataset):
                 index = np.concatenate((index, np.ones(self.clip_len - seg_len // self.frame_sample_rate) * seg_len))
                 index = np.clip(index, 0, seg_len - 1).astype(np.int64)
             else:
-                end_idx = np.random.randint(converted_len, seg_len)
+                if not rehearsal:
+                    end_idx = np.random.randint(converted_len, seg_len)
+                else:
+                    points = np.linspace(converted_len, seg_len, 4, endpoint=True)
+                    end_idx = int(np.random.choice(points))
                 str_idx = end_idx - converted_len
                 index = np.linspace(str_idx, end_idx, num=self.clip_len)
                 index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
