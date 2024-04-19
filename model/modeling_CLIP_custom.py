@@ -102,6 +102,7 @@ class ResidualAttentionBlock_time(nn.Module):
         #입력 cls_token B,T,D
         xs = self.ln_1(self.time_down(x))
         xs = self.time_act(self.attention(xs))
+        xs = self.time_up(xs)
         return xs
 
 class CLIP_custom(nn.Module):
