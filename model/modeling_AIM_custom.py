@@ -352,10 +352,10 @@ class AIM_custom(nn.Module):
             x = self.dropout(x)
         # [N, in_channels, 1, 1, 1]
         x = x.view(x.shape[0], -1)
-        
+        x_final = (self.temp_head(x_final)) if self.order else None
         if not self.each_head:#* each head아니면 그냥 원래대로 return
             cls_score = self.head(x)
-            return cls_score,(self.temp_head(x_final))
+            return cls_score, x_final
         if train:
         # [N, in_channels]
             cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
