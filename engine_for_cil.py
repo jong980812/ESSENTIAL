@@ -343,7 +343,7 @@ def train_one_epoch(model: torch.nn.Module,
             model, samples, targets, criterion,mask,task_id,args,device)
         else:
             with torch.cuda.amp.autocast():
-                loss, output = train_class_batch(
+                loss, order_loss,debias_loss,output = train_class_batch(
                 model, samples, targets, criterion,mask,task_id,args,device)
 
         loss_value = loss.item()
@@ -379,6 +379,8 @@ def train_one_epoch(model: torch.nn.Module,
             
             
         metric_logger.update(loss=loss_value)
+        metric_logger.update(order=order_loss.item()) if order_loss is not None else None 
+        metric_logger.update(debias=debias_loss.item()) if debias_loss is not None else None
         metric_logger.update(class_acc=class_acc)
         metric_logger.update(loss_scale=loss_scale_value)
         min_lr = 10.
@@ -407,14 +409,25 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     
     # if args.each_head:
     # first_class = mask[0]
-    if args.order:
-        outputs,x_final = model(samples,train=True,task_id=task_id)
-    else:
-        outputs,_= model(samples,train=True,task_id=task_id)
+    # if args.order:
+    outputs,x_final = model(samples,train=True,task_id=task_id)
+    # else:
+    #     outputs,_= model(samples,train=True,task_id=task_id)
     if (mask is not None) and (not args.each_head): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
         outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
+    target = target#-first_class
+    loss = criterion(outputs, target)
+    
+    if args.debias:
+        shuffled_indices = np.random.permutation(samples.shape[2])
+        shuffled_inputs = samples[:, :,shuffled_indices]
+        shuffled_outputs,_= model(shuffled_inputs,train=True,task_id=task_id)
+        debias_loss = -torch.mean(torch.sum(torch.nn.functional.log_softmax(shuffled_outputs, dim=1) 
+                * torch.ones(shuffled_outputs.shape[0], args.nb_classes, device=shuffled_inputs.device) 
+                / args.nb_classes, dim=1))
+        loss = loss + debias_loss
     if args.order:
         B, T = x_final.shape[:2]
         t_label = torch.LongTensor(list(range(T))).unsqueeze(0).repeat(B,1).to(args.device)
@@ -422,11 +435,9 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
         # TODO mixup
         # outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-1e4'))
         # target = target.index_fill(dim=1, index=not_mask, value=int(0))
-    target = target#-first_class
-    loss = criterion(outputs, target)
-    if args.order:
         loss = loss + order_loss
-    return loss, outputs
+        
+    return loss,(order_loss if args.order else None),(debias_loss if args.debias else None), outputs
 
 
 def get_loss_scale_for_deepspeed(model):
