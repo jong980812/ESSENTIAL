@@ -161,9 +161,9 @@ class AIM(nn.Module):
         self.order = args.order
         if self.order:
             self.temp_head = nn.Linear(embed_dim, num_frames)
-        trunc_normal_(self.temp_head.weight, std=.02)
-        self.temp_head.weight.data.mul_(init_scale)
-        self.temp_head.bias.data.mul_(init_scale)
+            trunc_normal_(self.temp_head.weight, std=.02)
+            self.temp_head.weight.data.mul_(init_scale)
+            self.temp_head.bias.data.mul_(init_scale)
         
         #!!
         self.each_head = args.each_head
@@ -293,6 +293,10 @@ class AIM(nn.Module):
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
+        n = x.shape[1]
+        x = rearrange(x, '(b t) n d -> (b n) t d', t=self.num_frames)
+        x = x + self.temporal_embedding
+        x = rearrange(x, '(b n) t d -> (b t) n d', n=n)
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
