@@ -164,7 +164,7 @@ class ResidualAttentionBlock_time(nn.Module):
         xs = self.ln_1(self.time_down(x))
         xs = self.time_act(self.attention(xs))
         xs = self.time_up(xs)
-        return xs
+        return xs+x
 class AIM_custom(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
@@ -190,7 +190,8 @@ class AIM_custom(nn.Module):
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
-        self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        # self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(4)])
 
         self.ln_post = LayerNorm(width)
         
@@ -342,7 +343,7 @@ class AIM_custom(nn.Module):
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         x = x + self.temporal_embedding
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-        x = self.transformer_for_cls(x)+x
+        x = self.transformer_for_cls(x)
         x = rearrange(x, 't b d -> b d t',b=B,t=T)
         x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
         #
