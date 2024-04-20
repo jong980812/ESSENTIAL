@@ -181,19 +181,17 @@ class AIM_custom(nn.Module):
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
-        self.temporal_embedding = nn.Parameter(torch.zeros(1, 2*num_frames, width))
+        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.order = args.order
         embed_dim = 768
-        self.cls_prompt = nn.Parameter(torch.FloatTensor(num_frames,embed_dim), requires_grad=True)
-        nn.init.uniform_(self.cls_prompt)
         if self.order:
-            self.temp_head = nn.Linear(embed_dim, 2*num_frames)
+            self.temp_head = nn.Linear(embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
-        self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
-        # self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(4)])
+        # self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(4)])
 
         self.ln_post = LayerNorm(width)
         
@@ -342,18 +340,12 @@ class AIM_custom(nn.Module):
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x[:, 0]
-        x = rearrange(x, '(b t) d -> t b d',b=B,t=T)
-        cls_prompt = self.cls_prompt.unsqueeze(1).expand(-1,B,-1)
-        stacked = torch.stack([x, cls_prompt], dim=0)
-        x = stacked.transpose(0, 1).reshape(2*T, B, 768)
-        
-        x = rearrange(x, 't b d -> b t d',b=B,t=2*T)
+        x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         x = x + self.temporal_embedding
-        x = rearrange(x, 'b t d -> t b d',b=B,t=2*T)
-        
+        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         x = self.transformer_for_cls(x)
-        x = rearrange(x, 't b d -> b d t',b=B,t=T*2)
-        x_final = rearrange(x,'b d t -> b t d',b=B,t=T*2)
+        x = rearrange(x, 't b d -> b d t',b=B,t=T)
+        x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
         #
         x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
         
