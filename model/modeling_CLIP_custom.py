@@ -125,6 +125,9 @@ class CLIP_custom(nn.Module):
         embed_dim = 768
         if self.order:
             self.temp_head = nn.Linear(embed_dim, num_frames)
+            trunc_normal_(self.temp_head.weight, std=.02)
+            self.temp_head.weight.data.mul_(init_scale)
+            self.temp_head.bias.data.mul_(init_scale)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp)
         self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
         # print(self.transformer_for_cls.load_state_dict(self.transformer.resblocks[-1].state_dict(),strict=False))
