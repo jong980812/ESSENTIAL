@@ -161,8 +161,8 @@ class ResidualAttentionBlock_time(nn.Module):
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
     def forward(self, x: torch.Tensor):
         #입력 cls_token B,T,D
-        xs = self.time_down(x)
-        xs = self.attention(self.ln_1(xs))
+        xs = self.ln_1(self.time_down(x))
+        xs = self.time_act(self.attention(xs))
         xs = self.time_up(xs)
         return xs
 class AIM_custom(nn.Module):

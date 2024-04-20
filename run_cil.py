@@ -257,6 +257,7 @@ def get_args_cil():
     parser.add_argument('--joint', action='store_true', default=False, help='')
     parser.add_argument('--slow_learner', action='store_true', default=False, help='')
     parser.add_argument('--order', action='store_true', default=False, help='')
+    parser.add_argument('--debias', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
     
 
