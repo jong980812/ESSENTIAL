@@ -165,7 +165,7 @@ class ResidualAttentionBlock_time(nn.Module):
         xs = self.time_act(self.attention(xs))
         xs = self.time_up(xs)
         return xs+x
-class AIM_custom(nn.Module):
+class AIM_base(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
         super().__init__()
