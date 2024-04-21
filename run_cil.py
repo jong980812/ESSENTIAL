@@ -35,6 +35,7 @@ from model.modeling_CLIP_S import CLIP_S
 from model.modeling_AIM_prev import AIM_prev
 from model.modeling_CLIP_base import CLIP_base
 from model.modeling_CLIP_custom import CLIP_custom
+from model.modeling_CLIP_cos import CLIP_cos
 from model.modeling_AIM_expand_adapter import AIM_expand
 from model.modeling_AIM_crossadapter import AIM_attn_adapter
 from model.modeling_AIM_custom import AIM_custom
@@ -506,6 +507,26 @@ def main(args, ds_init):
             print('unfreeze list :', unfreeze_list)
     elif args.model == 'CLIP_base':
         model = CLIP_base(
+            input_resolution=224,
+            patch_size=16,
+            num_frames=args.num_frames,
+            width=768,
+            layers=12,
+            heads=12,
+            drop_path_rate=0.2,
+            adapter_scale=0.5,
+            num_classes=args.nb_classes,
+            dim_mlp=args.dim_mlp,
+            init_scale=args.init_scale,
+            args = args
+        )
+        num_layers = model.layers
+        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if args.unfreeze_layers is not None:
+            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+            print('unfreeze list :', unfreeze_list)
+    elif args.model == 'CLIP_cos':
+        model = CLIP_cos(
             input_resolution=224,
             patch_size=16,
             num_frames=args.num_frames,

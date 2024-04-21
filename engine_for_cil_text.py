@@ -535,3 +535,4 @@ def compute_video(lst):
     top1 = (int(pred) == int(label)) * 1.0
     top5 = (int(label) in np.argsort(-feat)[:5]) * 1.0
     return [pred, top1, top5, int(label)]
+

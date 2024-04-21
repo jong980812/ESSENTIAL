@@ -413,12 +413,13 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     outputs,x_final = model(samples,train=True,task_id=task_id)
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
-    if (mask is not None) and (not args.each_head): #! each head이면 안됌.
-        not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
-        not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
-        outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
+    # if (mask is not None) and (not args.each_head): #! each head이면 안됌.
+    #     not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
+    #     not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
+    #     outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
     target = target#-first_class
-    loss = criterion(outputs, target)
+    # loss = criterion(outputs, target)
+    loss = model.module.cos_loss(outputs,target)
     
     if args.debias:
         shuffled_indices = np.random.permutation(samples.shape[2])
