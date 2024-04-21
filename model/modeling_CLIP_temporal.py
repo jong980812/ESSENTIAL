@@ -77,17 +77,36 @@ class Transformer(nn.Module):
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
 class ResidualAttentionBlock_time(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
+    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
         super().__init__()
-        self.attn = nn.MultiheadAttention(dim_mlp, n_head)
-        self.ln_1 = LayerNorm(dim_mlp)
-
-        self.attn_mask = attn_mask
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.time_down = nn.Linear(d_model,dim_mlp)
-        self.time_up = nn.Linear(dim_mlp,d_model)
-        self.time_act = nn.GELU()
-        self.initial_adapter()
+        self.temp_mode = temp_mode
+        if self.temp_mode=='transformer':
+            d_model = 768
+            n_head = 12
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+            self.ln_1 = LayerNorm(d_model)
+            self.mlp = nn.Sequential(OrderedDict([
+                ("c_fc", nn.Linear(d_model, d_model * 4)),
+                ("gelu", QuickGELU()),
+                ("c_proj", nn.Linear(d_model * 4, d_model))
+            ]))
+            self.ln_2 = LayerNorm(d_model)
+            self.attn_mask = attn_mask
+        elif self.temp_mode=='attention':
+            d_model = 768
+            n_head = 12
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+            self.attn_mask = attn_mask
+            self.ln_1 = LayerNorm(d_model)
+        elif self.temp_mode =='ba':
+            self.attn = nn.MultiheadAttention(dim_mlp, n_head)
+            self.ln_1 = LayerNorm(dim_mlp)
+            self.attn_mask = attn_mask
+            self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+            self.time_down = nn.Linear(d_model,dim_mlp)
+            self.time_up = nn.Linear(dim_mlp,d_model)
+            self.time_act = nn.GELU()
+            self.initial_adapter()
     def initial_adapter(self):
         print('Transformer for cls is initialized')
         for n, m in self.time_up.named_modules():
@@ -100,9 +119,15 @@ class ResidualAttentionBlock_time(nn.Module):
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
     def forward(self, x: torch.Tensor):
         #입력 cls_token B,T,D
-        xs = self.ln_1(self.time_down(x))
-        xs = self.time_act(self.attention(xs))
-        xs = self.time_up(xs)
+        if self.temp_mode=='transformer':
+            x = x + self.attention(self.ln_1(x))
+            xs = x + self.mlp(self.ln_2(x))
+        elif self.temp_mode=='attention':
+            xs = x + self.attention(self.ln_1(x))
+        elif self.temp_mode =='ba':
+            xs = self.ln_1(self.time_down(x))
+            xs = self.time_act(self.attention(xs))
+            xs = self.time_up(xs)+x
         return xs
 
 class CLIP_temporal(nn.Module):
@@ -131,7 +156,8 @@ class CLIP_temporal(nn.Module):
         
         self.ba_layers = args.ba_layers
         self.ba_heads = args.ba_heads
-        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(self.ba_layers)])
+        self.temp_mode = args.temp_mode
+        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(self.temp_mode,width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(self.ba_layers)])
 
         # print(self.transformer_for_cls.load_state_dict(self.transformer.resblocks[-1].state_dict(),strict=False))
         self.order = args.order
@@ -240,7 +266,7 @@ class CLIP_temporal(nn.Module):
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         x = x + self.temporal_embedding
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-        x = self.transformer_for_cls(x)+x
+        x = self.transformer_for_cls(x)
         x = rearrange(x, 't b d -> b d t',b=B,t=T)
         x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
         #

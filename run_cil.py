@@ -268,6 +268,8 @@ def get_args_cil():
     parser.add_argument('--ba_layers', default=1, type=int)
     parser.add_argument('--ba_heads', default=6, type=int)
     parser.add_argument('--cos_temp', default=4, type=int)
+    parser.add_argument('--temp_mode', default='ba', type=str)
+    
 
     
 
