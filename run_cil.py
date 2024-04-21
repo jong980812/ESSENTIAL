@@ -33,9 +33,8 @@ from model.modeling_AIM import AIM
 from model.modeling_CLIP import CLIP
 from model.modeling_CLIP_S import CLIP_S
 from model.modeling_AIM_prev import AIM_prev
-from model.modeling_CLIP_base import CLIP_base
 from model.modeling_CLIP_custom import CLIP_custom
-from model.modeling_CLIP_cos import CLIP_cos
+from model.modeling_CLIP_temporal import CLIP_temporal
 from model.modeling_AIM_expand_adapter import AIM_expand
 from model.modeling_AIM_crossadapter import AIM_attn_adapter
 from model.modeling_AIM_custom import AIM_custom
@@ -228,7 +227,6 @@ def get_args_cil():
     
     parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
     parser.add_argument('--adapter_layers', default=[0,1,2,3,4,5,6,7,8,9,10,11], nargs='+', type=int)
-    parser.add_argument('--temporal_modeling_layers', default=1, type=int)
     
     #********** CIL parameters*****************
     parser.add_argument('--num_tasks', default=10, type=int,
@@ -264,6 +262,13 @@ def get_args_cil():
     parser.add_argument('--cos', action='store_true', default=False, help='')
     parser.add_argument('--debias', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
+    
+    
+    #**************BA*****************
+    parser.add_argument('--ba_layers', default=1, type=int)
+    parser.add_argument('--ba_heads', default=6, type=int)
+    parser.add_argument('--cos_temp', default=4, type=int)
+
     
 
 
@@ -507,28 +512,8 @@ def main(args, ds_init):
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
-    elif args.model == 'CLIP_base':
-        model = CLIP_base(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            args = args
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-    elif args.model == 'CLIP_cos':
-        model = CLIP_cos(
+    elif args.model == 'CLIP_temporal':
+        model = CLIP_temporal(
             input_resolution=224,
             patch_size=16,
             num_frames=args.num_frames,
