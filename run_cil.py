@@ -228,6 +228,7 @@ def get_args_cil():
     
     parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
     parser.add_argument('--adapter_layers', default=[0,1,2,3,4,5,6,7,8,9,10,11], nargs='+', type=int)
+    parser.add_argument('--temporal_modeling_layers', default=1, type=int)
     
     #********** CIL parameters*****************
     parser.add_argument('--num_tasks', default=10, type=int,
@@ -260,6 +261,7 @@ def get_args_cil():
     parser.add_argument('--joint', action='store_true', default=False, help='')
     parser.add_argument('--slow_learner', action='store_true', default=False, help='')
     parser.add_argument('--order', action='store_true', default=False, help='')
+    parser.add_argument('--cos', action='store_true', default=False, help='')
     parser.add_argument('--debias', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
     

@@ -79,7 +79,7 @@ class Transformer(nn.Module):
 class ResidualAttentionBlock_time(nn.Module):
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
         super().__init__()
-        self.attn = nn.MultiheadAttention(dim_mlp, 6)
+        self.attn = nn.MultiheadAttention(dim_mlp, n_head)
         self.ln_1 = LayerNorm(dim_mlp)
 
         self.attn_mask = attn_mask
@@ -118,10 +118,11 @@ class CLIP_cos(nn.Module):
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
         self.ln_pre = LayerNorm(width)
-
+        self.temporal_modeling_layers = args.temporal_modeling_layers
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.order = args.order
+        self.cos = args.cos
         embed_dim = 768
         if self.order:
             self.temp_head = nn.Linear(embed_dim, num_frames)
@@ -129,10 +130,12 @@ class CLIP_cos(nn.Module):
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp)
-        self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(self.temporal_modeling_layers)])
+
         # print(self.transformer_for_cls.load_state_dict(self.transformer.resblocks[-1].state_dict(),strict=False))
         self.ln_post = LayerNorm(width)
-        self.cos_loss = AngularPenaltySMLoss('cosface')
+        if self.cos:
+            self.cos_loss = AngularPenaltySMLoss('cosface')
 
         self.head = nn.Linear(embed_dim, num_classes,bias=False) if num_classes > 0 else nn.Identity()
         trunc_normal_(self.head.weight, std=.02)
@@ -242,11 +245,13 @@ class CLIP_cos(nn.Module):
             x = self.dropout(x)
         # [N, in_channels, 1, 1, 1]
         x = x.view(x.shape[0], -1)
+        if self.cos:
+            x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+            x = 4 * x  # temperature set as 16
+        else:
         # [N, in_channels]
-        # cls_score = self.head(x)
+            x = self.head(x)
         # [N, num_classes]
-        x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-        x = 4 * x  # temperature set as 16
         return x,(self.temp_head(x_final) if self.order else None)
         
 class AngularPenaltySMLoss(nn.Module):
