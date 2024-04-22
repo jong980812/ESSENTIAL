@@ -35,6 +35,7 @@ class SSVideoClsDataset(Dataset):
         self.args = args
         self.aug = False
         self.rand_erase = False
+        self.rehearsal = rehearsal
         self.return_text=False
         
         if self.mode in ['train']:
@@ -154,7 +155,7 @@ class SSVideoClsDataset(Dataset):
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample)
+            buffer = self.loadvideo_decord(sample,self.rehearsal)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -260,7 +261,7 @@ class SSVideoClsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, sample_rate_scale=1):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
         if not (os.path.exists(fname)):
@@ -296,8 +297,11 @@ class SSVideoClsDataset(Dataset):
         average_duration = len(vr) // self.num_segment
         all_index = []
         if average_duration > 0:
-            all_index += list(np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration,
+            if not rehearsal:
+                all_index += list(np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration,
                                                                                                         size=self.num_segment))
+            else:
+                all_index += list(np.multiply(list(range(self.num_segment)), average_duration))
         elif len(vr) > self.num_segment:
             all_index += list(np.sort(np.random.randint(len(vr), size=self.num_segment)))
         else:
