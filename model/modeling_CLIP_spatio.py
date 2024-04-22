@@ -123,7 +123,7 @@ class ResidualAttentionBlock_time(nn.Module):
             x = x + self.attention(self.ln_1(x))
             xs = x + self.mlp(self.ln_2(x))
         elif self.temp_mode=='attention':
-            xs = x + self.attention(self.ln_1(x))
+            xs = self.attention(self.ln_1(x))
         elif self.temp_mode =='ba':
             xs = self.ln_1(self.time_down(x))
             xs = self.time_act(self.attention(xs))

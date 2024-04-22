@@ -141,7 +141,7 @@ class Transformer(nn.Module):
 class ResidualAttentionBlock_time(nn.Module):
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
         super().__init__()
-        self.attn = nn.MultiheadAttention(dim_mlp, 6)
+        self.attn = nn.MultiheadAttention(dim_mlp, 12)
         self.ln_1 = LayerNorm(dim_mlp)
 
         self.attn_mask = attn_mask
@@ -189,13 +189,13 @@ class AIM_base(nn.Module):
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
+        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         # self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
-        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(4)])
-
+        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(2)])
         self.ln_post = LayerNorm(width)
-        
-        self.cos_loss = AngularPenaltySMLoss('cosface')
+        self.cos = args.cos
+        if self.cos:
+            self.cos_loss = AngularPenaltySMLoss('cosface')
         
         #!!
         self.each_head = args.each_head
@@ -358,11 +358,18 @@ class AIM_base(nn.Module):
             x = self.dropout(x)
         # [N, in_channels, 1, 1, 1]
         x = x.view(x.shape[0], -1)
+        
+        if self.cos:
+            x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+            x = self.cos_temp * x  # temperature set as 16
+        else:
+        # [N, in_channels]
+            x = self.head(x)
         x_final = (self.temp_head(x_final)) if self.order else None
-        x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-        x = 4 * x  # temperature set as 16
+        # x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+        # x = 4 * x  # temperature set as 16
         if not self.each_head:#* each head아니면 그냥 원래대로 return
-            # cls_score = self.head(x)
+            x = self.head(x)
             return x, x_final
         if train:
         # [N, in_channels]
