@@ -368,17 +368,17 @@ class AIM_base(nn.Module):
         x_final = (self.temp_head(x_final)) if self.order else None
         # x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
         # x = 4 * x  # temperature set as 16
-        if not self.each_head:#* each head아니면 그냥 원래대로 return
-            x = self.head(x)
-            return x, x_final
-        if train:
-        # [N, in_channels]
-            cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
-        else:
-            logits = [self.head[t](x) for t in range(task_id+1)]
-            cls_score = torch.cat(logits,1)
+        # if not self.each_head:#* each head아니면 그냥 원래대로 return
+        #     x = self.head(x)
+        #     return x, x_final
+        # if train:
+        # # [N, in_channels]
+        #     cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
+        # else:
+        #     logits = [self.head[t](x) for t in range(task_id+1)]
+        #     cls_score = torch.cat(logits,1)
         # [N, num_classes]
-        return cls_score
+        return x,(x_final)
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산

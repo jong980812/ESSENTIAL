@@ -92,7 +92,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.transformer.make_new_adapter()
                     model.to(args.device)
                 elif args.model=='AIM_custom' or args.model=='AIM_base':
-                    model.module.unfreeze(['head'])#['transformer_for_cls','head','temporal_embedding','cls_prompt'])
+                    model.module.unfreeze(['transformer_for_cls','head','temporal_embedding','cls_prompt'])
                     model.to(args.device)
                 
                 optimizer = create_optimizer(
