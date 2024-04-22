@@ -157,7 +157,7 @@ class CLIP_temporal(nn.Module):
         self.ba_layers = args.ba_layers
         self.ba_heads = args.ba_heads
         self.temp_mode = args.temp_mode
-        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(self.temp_mode,width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(self.ba_layers)])
+        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(self.temp_mode,width, self.ba_heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(self.ba_layers)])
 
         # print(self.transformer_for_cls.load_state_dict(self.transformer.resblocks[-1].state_dict(),strict=False))
         self.order = args.order
