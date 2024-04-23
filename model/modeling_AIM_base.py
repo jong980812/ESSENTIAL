@@ -177,7 +177,6 @@ class AIM_base(nn.Module):
         self.layers = layers
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
-        
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
@@ -194,8 +193,6 @@ class AIM_base(nn.Module):
         self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(2)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
-        if self.cos:
-            self.cos_loss = AngularPenaltySMLoss('cosface')
         
         #!!
         self.each_head = args.each_head
@@ -216,6 +213,13 @@ class AIM_base(nn.Module):
             self.init_weights(pretrained='clip')
             self.head.weight.data.mul_(init_scale)
             self.head.bias.data.mul_(init_scale)
+        if self.cos:
+            self.cos_loss = AngularPenaltySMLoss('cosface')
+            self.cos_temp = args.cos_temp
+            init_scale = 1.0
+            self.head = nn.Linear(embed_dim, num_classes,bias=False) if num_classes > 0 else nn.Identity()
+            trunc_normal_(self.head.weight, std=.02)
+            self.head.weight.data.mul_(init_scale)
         self.dropout_ratio = dropout_ratio
         if self.dropout_ratio != 0:
             self.dropout = nn.Dropout(p=self.dropout_ratio)

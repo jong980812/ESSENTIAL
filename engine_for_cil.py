@@ -18,7 +18,7 @@ from utils import unfreeze_block
 
 def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Module, 
                     criterion, data_loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device, 
-                    class_mask=None, args = None,loss_scaler=None):
+                    class_mask=None, args = None,loss_scaler=None, inference = False):
 
 
     train_stats = {}
@@ -92,7 +92,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.transformer.make_new_adapter()
                     model.to(args.device)
                 elif args.model=='AIM_custom' or args.model=='AIM_base':
-                    model.module.unfreeze(['transformer_for_cls','head','temporal_embedding','cls_prompt'])
+                    model.module.unfreeze(['head'])#['transformer_for_cls','head','temporal_embedding','cls_prompt'])
                     model.to(args.device)
                 
                 optimizer = create_optimizer(
@@ -104,8 +104,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
         print('****Up Projection weight****')
         # print(model.module.transformer.resblocks[5].T_Adapter.D_fc2.weight[:20,0])
-        # if task_id<19:
-        #     continue
+        if args.inference and (task_id<(args.num_tasks-1)):
+            continue
         #!************************ Traininig *************************************
         Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
         checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_start_checkpoint.pth'.format(task_id+1))
@@ -117,7 +117,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
         utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
-            if args.joint:
+            if args.joint or args.inference:
                 break
             # break
             # if epoch == epochs-5 and task_id>0:
@@ -154,7 +154,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         #!
         #!************************ Rehearsal *************************************
         if args.memory_size > 0:# and task_id > 0:
-
+            if args.inference:
+                break
             # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
             # print(unfreeze_list)
             # print('Freeze for rehearsal')
@@ -480,6 +481,7 @@ def evaluate(model: torch.nn.Module,  data_loader,
                 # selection_results = selection.argmax(1)#(B)
                 # if args.order:
                 logits,_ = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
+                logits[:,84:].mul_(0.)
                 # else:
                 # logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
                        

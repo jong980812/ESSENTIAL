@@ -160,7 +160,7 @@ def get_args_cil():
                         help='How to apply mixup/cutmix params. Per "batch", "pair", or "elem"')
 
     # Finetuning params
-    parser.add_argument('--finetune', default='', help='finetune from checkpoint')
+    parser.add_argument('--finetune', default=None, help='finetune from checkpoint')
     parser.add_argument('--model_key', default='model|module', type=str)
     parser.add_argument('--model_prefix', default='', type=str)
     parser.add_argument('--init_scale', default=0.001, type=float)
@@ -256,6 +256,7 @@ def get_args_cil():
     
     
     parser.add_argument('--cross', action='store_true', default=False, help='')
+    parser.add_argument('--inference', action='store_true', default=False, help='')
     parser.add_argument('--each_head', action='store_true', default=False, help='')
     parser.add_argument('--joint', action='store_true', default=False, help='')
     parser.add_argument('--slow_learner', action='store_true', default=False, help='')
@@ -789,10 +790,13 @@ def main(args, ds_init):
     print("="*40)
 #!************ Information *************
 
-
+    
+    if args.finetune is not None:
+        check = torch.load(args.finetune,'cpu')['model']
+        print(model.module.load_state_dict(check))
     train_and_evaluate(model, model_without_ddp,
                     criterion, data_loader, optimizer,
-                    device, class_mask, args,loss_scaler)
+                    device, class_mask, args,loss_scaler, args.inference)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Total training time: {total_time_str}")
