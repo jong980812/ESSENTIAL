@@ -142,8 +142,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
     def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
         super().__init__()
         self.temp_mode = temp_mode
-        scale = d_model ** -0.5
-        self.decoder_cls = nn.Parameter(scale * torch.randn(d_model))
+
         if self.temp_mode=='transformer':
             d_model = 768
             n_head = 12
@@ -183,10 +182,10 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
     def attention(self, q: torch.Tensor,kv:torch.Tensor):
         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
         return self.attn(q, kv, kv, need_weights=False, attn_mask=self.attn_mask)[0]
-    def forward(self, x: torch.Tensor):
+    def forward(self, cls: torch.Tensor,x: torch.Tensor):
         #입력 cls_token B,T,D
-        B = x.shape[0]# X: B,T,D
-        cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
+        B = x.shape[1]# X: T,B,D
+        # cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         if self.temp_mode=='transformer':
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
@@ -202,7 +201,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             x_cls= self.time_act(self.attention(ln_cls,ln1))
             cls = self.time_up(x_cls)+cls
         return cls
-class AIM_base(nn.Module):
+class AIM_base_decoder(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
         super().__init__()
@@ -217,7 +216,7 @@ class AIM_base(nn.Module):
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
-        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
+        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
         self.order = args.order
         embed_dim = 768
         if self.order:
@@ -227,6 +226,7 @@ class AIM_base(nn.Module):
             self.temp_head.bias.data.mul_(init_scale)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         # self.transformer_for_cls = Decoder_ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.decoder_cls = nn.Parameter(scale * torch.randn(width))
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
@@ -384,30 +384,41 @@ class AIM_base(nn.Module):
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
-        x = x + self.temporal_embedding
-        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-        x = self.decoder_transformer_for_cls(x)
-        x = rearrange(x, 't b d -> b d t',b=B,t=T)
-        x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
+        
+        
+        '''
+        x는 원래 CLIP으로 부터 나온 CLS 토큰들
+        cls는 decoder를 위한 새로운 CLS token. 
+        '''
+        cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
+        cls_and_x = torch.cat([cls,x],0)# B, T+1, D
+        cls_and_x = cls_and_x + self.temporal_embedding
+        cls_and_x = rearrange(x, 'b t d -> t b d',b=B,t=T+1)
+        cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls = self.decoder_transformer_for_cls(cls,x)
+        
+        cls = rearrange(cls, 't b d -> b d t',b=B,t=T)
+        # x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
         #
-        x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
+        cls = cls.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
         
         if self.avg_pool is not None:
-            x = self.avg_pool(x)
+            cls = self.avg_pool(cls)
         # [N, in_channels, 1, 1, 1]
         if self.dropout is not None:
-            x = self.dropout(x)
+            cls = self.dropout(cls)
         # [N, in_channels, 1, 1, 1]
-        x = x.view(x.shape[0], -1)
+        cls = cls.view(cls.shape[0], -1)
         
         if self.cos:
-            x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-            x = self.cos_temp * x  # temperature set as 16
+            cls = F.linear(F.normalize(cls, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+            cls = self.cos_temp * cls  # temperature set as 16
         else:
         # [N, in_channels]
-            x = self.head(x)
-        x_final = (self.temp_head(x_final)) if self.order else None
-        return x,(x_final)
+            cls = self.head(cls)
+        # x_final = (self.temp_head(x_final)) if self.order else None
+        return x,(None)
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
