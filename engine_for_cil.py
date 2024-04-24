@@ -92,7 +92,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.transformer.make_new_adapter()
                     model.to(args.device)
                 elif args.model=='AIM_custom' or args.model=='AIM_base':
-                    model.module.unfreeze(['head'])#['transformer_for_cls','head','temporal_embedding','cls_prompt'])
+                    model.module.unfreeze(args.unfreeze_layers_after_base)
                     model.to(args.device)
                 
                 optimizer = create_optimizer(
@@ -102,8 +102,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 loss_scaler = NativeScaler()
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
-        print('****Up Projection weight****')
-        # print(model.module.transformer.resblocks[5].T_Adapter.D_fc2.weight[:20,0])
+        
         if args.inference and (task_id<(args.num_tasks-1)):
             continue
         #!************************ Traininig *************************************
@@ -204,31 +203,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             model.module.train()
         # model, unfreeze_list = unfreeze_block(model,['head','Adapter'])  
         # print(unfreeze_list)
-         
-        if args.model=='AIM_expand':
-            model.module.transformer.add_task()
-        # # if task_id<19:
-        # #     continue
-        # if task_id >0:
-        #     model.module.head_scailing(len(class_mask[0]),len(class_mask[task_id]),task_id)
-        # check = torch.load('/data/jong980812/project/cil/videoCIL/result/AIM_expand/head_scailing/ucf20/OUT/checkpoint/task20_checkpoint.pth','cpu')['model']
-        # print(model.module.load_state_dict(check))
-        # # model.eval()
-        # if utils.is_main_process():
-        #     prev  =torch.load(os.path.join(args.output_dir, 'checkpoint/task{}_epoch_start_checkpoint.pth'.format(task_id+1)))['model']
-        #     current = model_without_ddp.state_dict()
-        #     for name in ['D_fc2','D_fc1']:
-        #         for i in range(12):
-        #             prev_adapter= prev[f'transformer.resblocks.{i}.S_Adapter.{name}.weight']
-        #             current_adapter= current[f'transformer.resblocks.{i}.S_Adapter.{name}.weight']
-        #             result = torch.where(torch.abs(current_adapter-prev_adapter) > torch.abs(current_adapter-prev_adapter).mean(0), current_adapter, prev_adapter)
-        #             current[f'transformer.resblocks.{i}.S_Adapter.{name}.weight']=result
-        #             prev_adapter= prev[f'transformer.resblocks.{i}.S_Adapter.{name}.bias']
-        #             current_adapter= current[f'transformer.resblocks.{i}.S_Adapter.{name}.bias']
-        #             result = torch.where(torch.abs(current_adapter-prev_adapter) > torch.abs(current_adapter-prev_adapter).mean(0), current_adapter, prev_adapter)
-        #             current[f'transformer.resblocks.{i}.S_Adapter.{name}.bias']=result
-            # print(model.module.load_state_dict(current))
-            # model.to(args.device)
             
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
@@ -481,7 +455,6 @@ def evaluate(model: torch.nn.Module,  data_loader,
                 # selection_results = selection.argmax(1)#(B)
                 # if args.order:
                 logits,_ = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
-                logits[:,84:].mul_(0.)
                 # else:
                 # logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
                        

@@ -261,16 +261,19 @@ def get_args_cil():
     parser.add_argument('--joint', action='store_true', default=False, help='')
     parser.add_argument('--slow_learner', action='store_true', default=False, help='')
     parser.add_argument('--order', action='store_true', default=False, help='')
-    parser.add_argument('--cos', action='store_true', default=False, help='')
     parser.add_argument('--debias', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
     
     
     #**************BA*****************
+    parser.add_argument('--cos', action='store_true', default=False, help='')
     parser.add_argument('--ba_layers', default=1, type=int)
-    parser.add_argument('--ba_heads', default=6, type=int)
+    parser.add_argument('--ba_heads', default=12, type=int)
+    parser.add_argument('--ba_dim', default=192, type=int)
     parser.add_argument('--cos_temp', default=4, type=int)
     parser.add_argument('--temp_mode', default='ba', type=str)
+    parser.add_argument('--unfreeze_layers_after_base', default=None, nargs='+', type=str)
+    
     
 
     

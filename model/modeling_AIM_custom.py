@@ -343,10 +343,14 @@ class AIM_custom(nn.Module):
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> t b d',b=B,t=T)
+        between_x = x[1:] - x[:-1]
+        between_x = torch.cat([between_x, between_x[-1].unsqueeze(0)], dim=0)
+        
         cls_prompt = self.cls_prompt.unsqueeze(1).expand(-1,B,-1)
         stacked = torch.stack([x, cls_prompt], dim=0)
+        mse_loss = F.mse_loss(cls_prompt, between_x)
         x = stacked.transpose(0, 1).reshape(2*T, B, 768)
-        
+
         x = rearrange(x, 't b d -> b t d',b=B,t=2*T)
         x = x + self.temporal_embedding
         x = rearrange(x, 'b t d -> t b d',b=B,t=2*T)
@@ -367,7 +371,7 @@ class AIM_custom(nn.Module):
         x_final = (self.temp_head(x_final)) if self.order else None
         if not self.each_head:#* each head아니면 그냥 원래대로 return
             cls_score = self.head(x)
-            return cls_score, x_final
+            return cls_score, x_final,mse_loss
         if train:
         # [N, in_channels]
             cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.

@@ -139,17 +139,36 @@ class Transformer(nn.Module):
                             m2.weight.requires_grad_(True)
                             m2.bias.requires_grad_(True)
 class ResidualAttentionBlock_time(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
+    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
         super().__init__()
-        self.attn = nn.MultiheadAttention(dim_mlp, 12)
-        self.ln_1 = LayerNorm(dim_mlp)
-
-        self.attn_mask = attn_mask
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.time_down = nn.Linear(d_model,dim_mlp)
-        self.time_up = nn.Linear(dim_mlp,d_model)
-        self.time_act = nn.GELU()
-        self.initial_adapter()
+        self.temp_mode = temp_mode
+        if self.temp_mode=='transformer':
+            d_model = 768
+            n_head = 12
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+            self.ln_1 = LayerNorm(d_model)
+            self.mlp = nn.Sequential(OrderedDict([
+                ("c_fc", nn.Linear(d_model, d_model * 4)),
+                ("gelu", QuickGELU()),
+                ("c_proj", nn.Linear(d_model * 4, d_model))
+            ]))
+            self.ln_2 = LayerNorm(d_model)
+            self.attn_mask = attn_mask
+        elif self.temp_mode=='attention':
+            d_model = 768
+            n_head = 12
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+            self.attn_mask = attn_mask
+            self.ln_1 = LayerNorm(d_model)
+        elif self.temp_mode =='ba':
+            self.attn = nn.MultiheadAttention(dim_mlp, n_head)
+            self.ln_1 = LayerNorm(dim_mlp)
+            self.attn_mask = attn_mask
+            self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+            self.time_down = nn.Linear(d_model,dim_mlp)
+            self.time_up = nn.Linear(dim_mlp,d_model)
+            self.time_act = nn.GELU()
+            self.initial_adapter()
     def initial_adapter(self):
         for n, m in self.time_up.named_modules():
             for n2, m2 in m.named_modules():
@@ -161,9 +180,15 @@ class ResidualAttentionBlock_time(nn.Module):
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
     def forward(self, x: torch.Tensor):
         #입력 cls_token B,T,D
-        xs = self.ln_1(self.time_down(x))
-        xs = self.time_act(self.attention(xs))
-        xs = self.time_up(xs)
+        if self.temp_mode=='transformer':
+            x = x + self.attention(self.ln_1(x))
+            xs = x + self.mlp(self.ln_2(x))
+        elif self.temp_mode=='attention':
+            xs = x + self.attention(self.ln_1(x))
+        elif self.temp_mode =='ba':
+            xs = self.ln_1(self.time_down(x))
+            xs = self.time_act(self.attention(xs))
+            xs = self.time_up(xs)+x
         return xs+x
 class AIM_base(nn.Module):
     ## ViT definition in CLIP image encoder
@@ -190,7 +215,7 @@ class AIM_base(nn.Module):
             self.temp_head.bias.data.mul_(init_scale)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         # self.transformer_for_cls = ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
-        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(2)])
+        self.transformer_for_cls = nn.Sequential(*[ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
         
@@ -370,18 +395,6 @@ class AIM_base(nn.Module):
         # [N, in_channels]
             x = self.head(x)
         x_final = (self.temp_head(x_final)) if self.order else None
-        # x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-        # x = 4 * x  # temperature set as 16
-        # if not self.each_head:#* each head아니면 그냥 원래대로 return
-        #     x = self.head(x)
-        #     return x, x_final
-        # if train:
-        # # [N, in_channels]
-        #     cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
-        # else:
-        #     logits = [self.head[t](x) for t in range(task_id+1)]
-        #     cls_score = torch.cat(logits,1)
-        # [N, num_classes]
         return x,(x_final)
     
 def adjust_norm(input_tensor, ref_tensor):
