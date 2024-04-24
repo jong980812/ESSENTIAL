@@ -267,10 +267,10 @@ def get_args_cil():
     
     #**************BA*****************
     parser.add_argument('--cos', action='store_true', default=False, help='')
+    parser.add_argument('--cos_temp', default=4, type=int)
     parser.add_argument('--ba_layers', default=1, type=int)
     parser.add_argument('--ba_heads', default=12, type=int)
     parser.add_argument('--ba_dim', default=192, type=int)
-    parser.add_argument('--cos_temp', default=4, type=int)
     parser.add_argument('--temp_mode', default='ba', type=str)
     parser.add_argument('--unfreeze_layers_after_base', default=None, nargs='+', type=str)
     
@@ -408,76 +408,6 @@ def main(args, ds_init):
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
-            
-    elif args.model == 'AIM_attn_adapter':
-        model = AIM_attn_adapter(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-        # check = torch.load('/data/jong980812/project/cil/videoCIL/result/debugging/k400/OUT/checkpoint/task20_checkpoint.pth','cpu')['model']
-        # print(model.load_state_dict(check))
-        
-    elif args.model == 'AIM_prev':
-        model = AIM_prev(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-        model.transformer.transfer_c_to_p()
-        model.transformer.set_first(True)
-    elif args.model == 'AIM_expand':
-        model = AIM_expand(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers
-        )
-
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-
-        model.eval()
         
         
     elif args.model == 'CLIP':
@@ -553,27 +483,6 @@ def main(args, ds_init):
             dim_mlp=args.dim_mlp,
             init_scale=args.init_scale,
             args = args
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-    elif args.model == 'CLIP_S':
-        model = CLIP_S(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask = class_mask
         )
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
