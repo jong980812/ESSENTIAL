@@ -138,8 +138,71 @@ class Transformer(nn.Module):
                             # nn.init.constant_(m2.bias, 0)
                             m2.weight.requires_grad_(True)
                             m2.bias.requires_grad_(True)
-
-class AIM(nn.Module):
+class Decoder_ResidualAttentionBlock_time(nn.Module):
+    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
+        super().__init__()
+        self.temp_mode = temp_mode
+        scale = d_model ** -0.5
+        self.decoder_cls = nn.Parameter(scale * torch.randn(d_model))
+        if self.temp_mode=='transformer':
+            d_model = 768
+            n_head = 12
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+            self.mlp = nn.Sequential(OrderedDict([
+                ("c_fc", nn.Linear(d_model, d_model * 4)),
+                ("gelu", QuickGELU()),
+                ("c_proj", nn.Linear(d_model * 4, d_model))
+            ]))
+            self.ln_1 = LayerNorm(d_model)
+            self.ln_2 = LayerNorm(d_model)
+            self.ln_cls = LayerNorm(d_model)
+            self.attn_mask = attn_mask
+        elif self.temp_mode=='attention':
+            d_model = 768
+            n_head = 12
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+            self.attn_mask = attn_mask
+            self.ln_1 = LayerNorm(d_model)
+            self.ln_cls = LayerNorm(d_model)
+        elif self.temp_mode =='ba':
+            self.attn = nn.MultiheadAttention(dim_mlp, n_head)
+            self.ln_1 = LayerNorm(dim_mlp)
+            self.ln_cls = LayerNorm(d_model)
+            self.attn_mask = attn_mask
+            self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+            self.time_down = nn.Linear(d_model,dim_mlp)
+            self.time_up = nn.Linear(dim_mlp,d_model)
+            self.time_act = nn.GELU()
+            self.initial_adapter()
+    def initial_adapter(self):
+        for n, m in self.time_up.named_modules():
+            for n2, m2 in m.named_modules():
+                if isinstance(m2, nn.Linear):
+                    nn.init.constant_(m2.weight, 0)
+                    nn.init.constant_(m2.bias, 0)
+    def attention(self, q: torch.Tensor,kv:torch.Tensor):
+        self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
+        return self.attn(q, kv, kv, need_weights=False, attn_mask=self.attn_mask)[0]
+    def forward(self, x: torch.Tensor):
+        #입력 cls_token B,T,D
+        B = x.shape[0]# X: B,T,D
+        cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
+        if self.temp_mode=='transformer':
+            ln_cls = self.ln_cls(cls)
+            ln1 = self.ln_1(x)
+            cls = cls + self.attention(ln_cls,ln1)
+            cls = cls + self.mlp(self.ln_2(cls))
+        elif self.temp_mode=='attention':
+            ln_cls = self.ln_cls(cls)
+            ln1 = self.ln_1(x)
+            cls = cls + self.attention(ln_cls,ln1)
+        elif self.temp_mode =='ba':
+            ln_cls = self.ln_cls(self.time_down(cls))
+            ln1 = self.ln_1(self.time_down(x))
+            x_cls= self.time_act(self.attention(ln_cls,ln1))
+            cls = self.time_up(x_cls)+cls
+        return cls
+class AIM_base(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
         super().__init__()
@@ -155,15 +218,18 @@ class AIM(nn.Module):
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
-        self.ln_post = LayerNorm(width)
-        embed_dim = 768
         self.order = args.order
+        embed_dim = 768
         if self.order:
             self.temp_head = nn.Linear(embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
+        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
+        # self.transformer_for_cls = Decoder_ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(args.ba_layers)])
+        self.ln_post = LayerNorm(width)
+        self.cos = args.cos
         
         #!!
         self.each_head = args.each_head
@@ -184,6 +250,13 @@ class AIM(nn.Module):
             self.init_weights(pretrained='clip')
             self.head.weight.data.mul_(init_scale)
             self.head.bias.data.mul_(init_scale)
+        if self.cos:
+            self.cos_loss = AngularPenaltySMLoss('cosface')
+            self.cos_temp = args.cos_temp
+            init_scale = 1.0
+            self.head = nn.Linear(embed_dim, num_classes,bias=False) if num_classes > 0 else nn.Identity()
+            trunc_normal_(self.head.weight, std=.02)
+            self.head.weight.data.mul_(init_scale)
         self.dropout_ratio = dropout_ratio
         if self.dropout_ratio != 0:
             self.dropout = nn.Dropout(p=self.dropout_ratio)
@@ -211,7 +284,17 @@ class AIM(nn.Module):
         #self.head.weight[current:,: ] = torch.nn.Parameter(adjusted_cols.permute(1,0))
         data[:,first_task:first_task+task_id*class_per_task ] = adjusted_cols
         self.head.weight = nn.Parameter(data.permute(1,0))
-        
+    def unfreeze(self,block_list):
+        unfreeze_list = []
+        for name, param in self.named_parameters():
+            for block in block_list:#if block in block_list
+                if block in name:
+                    param.requires_grad = True
+                    unfreeze_list.append(name)
+                    break
+                else:
+                    param.requires_grad = False
+        print(f'unfreeze_list:{unfreeze_list}')
     def init_weights(self, pretrained=None):
         def _init_weights(m):
             if isinstance(m, nn.Linear):
@@ -293,20 +376,20 @@ class AIM(nn.Module):
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
-        n = x.shape[1]
-        x = rearrange(x, '(b t) n d -> (b n) t d', t=self.num_frames)
-        x = x + self.temporal_embedding
-        x = rearrange(x, '(b n) t d -> (b t) n d', n=n)
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_post(x)# BT N D
-        x_final = rearrange(x[:,1:],'(b t) n d -> b t n d',b=B,t=T)
+        x = self.ln_post(x)
         x = x[:, 0]
-        x = rearrange(x, '(b t) d -> b d t',b=B,t=T)
-        
+        x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
+        x = x + self.temporal_embedding
+        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
+        x = self.decoder_transformer_for_cls(x)
+        x = rearrange(x, 't b d -> b d t',b=B,t=T)
+        x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
+        #
         x = x.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
         
         if self.avg_pool is not None:
@@ -317,17 +400,14 @@ class AIM(nn.Module):
         # [N, in_channels, 1, 1, 1]
         x = x.view(x.shape[0], -1)
         
-        if not self.each_head:#* each head아니면 그냥 원래대로 return
-            cls_score = self.head(x)
-            return cls_score,(self.temp_head(x_final.mean(2)) if self.order else None)
-        if train:
-        # [N, in_channels]
-            cls_score = self.head[task_id](x)#! 학습 중에는 현재 태스크 알 수 있음.
+        if self.cos:
+            x = F.linear(F.normalize(x, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+            x = self.cos_temp * x  # temperature set as 16
         else:
-            logits = [self.head[t](x) for t in range(task_id+1)]
-            cls_score = torch.cat(logits,1)
-        # [N, num_classes]
-        return cls_score
+        # [N, in_channels]
+            x = self.head(x)
+        x_final = (self.temp_head(x_final)) if self.order else None
+        return x,(x_final)
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
@@ -341,3 +421,52 @@ def adjust_norm(input_tensor, ref_tensor):
     adjusted_tensor = input_tensor * (ref_mean_norm / input_norm)
     
     return adjusted_tensor
+
+
+class AngularPenaltySMLoss(nn.Module):
+    def __init__(self, loss_type='arcface', eps=1e-7, s=None, m=None):
+        '''
+        Angular Penalty Softmax Loss
+        Three 'loss_types' available: ['arcface', 'sphereface', 'cosface']
+        These losses are described in the following papers:
+
+        ArcFace: https://arxiv.org/abs/1801.07698
+        SphereFace: https://arxiv.org/abs/1704.08063
+        CosFace/Ad Margin: https://arxiv.org/abs/1801.05599
+        '''
+
+        super(AngularPenaltySMLoss, self).__init__()
+        loss_type = loss_type.lower()
+        assert loss_type in ['arcface', 'sphereface', 'cosface', 'crossentropy']
+        if loss_type == 'arcface':
+            self.s = 64.0 if not s else s
+            self.m = 0.5 if not m else m
+        if loss_type == 'sphereface':
+            self.s = 64.0 if not s else s
+            self.m = 1.35 if not m else m
+        if loss_type == 'cosface':
+            self.s = 30.0 if not s else s
+            self.m = 0.4 if not m else m
+        self.loss_type = loss_type
+        self.eps = eps
+
+        self.cross_entropy = nn.CrossEntropyLoss()
+
+    def forward(self, wf, labels):
+        # wf = wf.transpose(0, 1)
+        if self.loss_type == 'crossentropy':
+            return self.cross_entropy(wf, labels)
+        else:
+            if self.loss_type == 'cosface':
+                numerator = self.s * (torch.diagonal(wf.transpose(0, 1)[labels]) - self.m)
+            if self.loss_type == 'arcface':
+                numerator = self.s * torch.cos(torch.acos(
+                    torch.clamp(torch.diagonal(wf.transpose(0, 1)[labels]), -1. + self.eps, 1 - self.eps)) + self.m)
+            if self.loss_type == 'sphereface':
+                numerator = self.s * torch.cos(self.m * torch.acos(
+                    torch.clamp(torch.diagonal(wf.transpose(0, 1)[labels]), -1. + self.eps, 1 - self.eps)))
+
+            excl = torch.cat([torch.cat((wf[i, :y], wf[i, y + 1:])).unsqueeze(0) for i, y in enumerate(labels)], dim=0)
+            denominator = torch.exp(numerator) + torch.sum(torch.exp(self.s * excl), dim=1)
+            L = numerator - torch.log(denominator)
+            return -torch.mean(L)

@@ -31,13 +31,9 @@ from engine_for_cil import train_and_evaluate
 
 from model.modeling_AIM import AIM
 from model.modeling_CLIP import CLIP
-from model.modeling_CLIP_S import CLIP_S
-from model.modeling_AIM_prev import AIM_prev
 from model.modeling_CLIP_custom import CLIP_custom
 from model.modeling_CLIP_spatio import CLIP_spatio
 from model.modeling_CLIP_temporal import CLIP_temporal
-from model.modeling_AIM_expand_adapter import AIM_expand
-from model.modeling_AIM_crossadapter import AIM_attn_adapter
 from model.modeling_AIM_custom import AIM_custom
 from model.modeling_AIM_base import AIM_base
 import model.modelling_vmae
