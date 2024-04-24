@@ -391,17 +391,17 @@ class AIM_base_decoder(nn.Module):
         cls는 decoder를 위한 새로운 CLS token. 
         '''
         cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
-        cls_and_x = torch.cat([cls,x],0)# B, T+1, D
+        cls_and_x = torch.cat([cls,x],1)# B, T+1, D
         cls_and_x = cls_and_x + self.temporal_embedding
-        cls_and_x = rearrange(x, 'b t d -> t b d',b=B,t=T+1)
+        cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
         cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
-            cls = self.decoder_transformer_for_cls(cls,x)
-        
-        cls = rearrange(cls, 't b d -> b d t',b=B,t=T)
+            cls = decoder(cls.unsqueeze(0),x)
+        cls_len = cls.shape[0]
+        cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         # x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
         #
-        cls = cls.unsqueeze(-1).unsqueeze(-1)  # BDTHW for I3D head
+        cls = cls.unsqueeze(-1).unsqueeze(-1)
         
         if self.avg_pool is not None:
             cls = self.avg_pool(cls)
@@ -418,7 +418,7 @@ class AIM_base_decoder(nn.Module):
         # [N, in_channels]
             cls = self.head(cls)
         # x_final = (self.temp_head(x_final)) if self.order else None
-        return x,(None)
+        return cls,(None)
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산

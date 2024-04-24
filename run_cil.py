@@ -36,6 +36,7 @@ from model.modeling_CLIP_spatio import CLIP_spatio
 from model.modeling_CLIP_temporal import CLIP_temporal
 from model.modeling_AIM_custom import AIM_custom
 from model.modeling_AIM_base import AIM_base
+from model.modeling_AIM_base_decoder import AIM_base_decoder
 import model.modelling_vmae
 import genetic
 import random
@@ -404,7 +405,28 @@ def main(args, ds_init):
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
-        
+    elif args.model == 'AIM_base_decoder':
+        model = AIM_base_decoder(
+            input_resolution=224,
+            patch_size=16,
+            num_frames=args.num_frames,
+            width=768,
+            layers=12,
+            heads=12,
+            drop_path_rate=0.2,
+            adapter_scale=0.5,
+            num_classes=args.nb_classes,
+            dim_mlp=args.dim_mlp,
+            init_scale=args.init_scale,
+            adapter_layers=args.adapter_layers,
+            class_mask=class_mask,
+            args=args
+        )
+        num_layers = model.layers
+        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        if args.unfreeze_layers is not None:
+            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+            print('unfreeze list :', unfreeze_list)
         
     elif args.model == 'CLIP':
         model = CLIP(
