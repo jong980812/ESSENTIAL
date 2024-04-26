@@ -52,6 +52,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
         print(f"Start task training for {epochs} epochs")
+        if args.ssv2_first_finetune is not None and (task_id<1):
+            continue
         if args.joint:
             if task_id< args.num_tasks-1:
                 continue
@@ -91,7 +93,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 elif args.model=='AIM_expand':
                     model.module.transformer.make_new_adapter()
                     model.to(args.device)
-                elif args.model=='AIM_custom' or args.model=='AIM_base':
+                elif args.model=='AIM_custom' or args.model=='AIM_base' or args.model=='AIM_base_decoder':
                     model.module.unfreeze(args.unfreeze_layers_after_base)
                     model.to(args.device)
                 

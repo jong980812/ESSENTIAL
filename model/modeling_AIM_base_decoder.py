@@ -139,9 +139,10 @@ class Transformer(nn.Module):
                             m2.weight.requires_grad_(True)
                             m2.bias.requires_grad_(True)
 class Decoder_ResidualAttentionBlock_time(nn.Module):
-    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
+    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.2,dim_mlp=192):
         super().__init__()
         self.temp_mode = temp_mode
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
         if self.temp_mode=='transformer':
             d_model = 768
@@ -166,9 +167,10 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
         elif self.temp_mode =='ba':
             self.attn = nn.MultiheadAttention(dim_mlp, n_head)
             self.ln_1 = LayerNorm(dim_mlp)
-            self.ln_cls = LayerNorm(d_model)
+            self.ln_cls = LayerNorm(dim_mlp)
             self.attn_mask = attn_mask
             self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+            self.kv_down = nn.Linear(d_model,dim_mlp)
             self.time_down = nn.Linear(d_model,dim_mlp)
             self.time_up = nn.Linear(dim_mlp,d_model)
             self.time_act = nn.GELU()
@@ -179,9 +181,9 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
                 if isinstance(m2, nn.Linear):
                     nn.init.constant_(m2.weight, 0)
                     nn.init.constant_(m2.bias, 0)
-    def attention(self, q: torch.Tensor,kv:torch.Tensor):
+    def attention(self, q: torch.Tensor,kv:torch.Tensor, need_weights=False):
         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
-        return self.attn(q, kv, kv, need_weights=False, attn_mask=self.attn_mask)[0]
+        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1]
     def forward(self, cls: torch.Tensor,x: torch.Tensor):
         #입력 cls_token B,T,D
         B = x.shape[1]# X: T,B,D
@@ -189,15 +191,15 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
         if self.temp_mode=='transformer':
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
-            cls = cls + self.attention(ln_cls,ln1)
-            cls = cls + self.mlp(self.ln_2(cls))
+            cls = cls + self.drop_path(self.attention(ln_cls,ln1))
+            cls = cls + self.drop_path(self.mlp(self.ln_2(cls)))
         elif self.temp_mode=='attention':
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
-            cls = cls + self.attention(ln_cls,ln1)
+            cls = cls + self.drop_path(self.attention(ln_cls,ln1))
         elif self.temp_mode =='ba':
             ln_cls = self.ln_cls(self.time_down(cls))
-            ln1 = self.ln_1(self.time_down(x))
+            ln1 = self.ln_1(self.kv_down(x))
             x_cls= self.time_act(self.attention(ln_cls,ln1))
             cls = self.time_up(x_cls)+cls
         return cls
@@ -227,7 +229,7 @@ class AIM_base_decoder(nn.Module):
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         # self.transformer_for_cls = Decoder_ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
         self.decoder_cls = nn.Parameter(scale * torch.randn(width))
-        self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(args.ba_layers)])
+        self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
         
@@ -395,8 +397,9 @@ class AIM_base_decoder(nn.Module):
         cls_and_x = cls_and_x + self.temporal_embedding
         cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
         cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
+        cls = cls.unsqueeze(0)
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
-            cls = decoder(cls.unsqueeze(0),x)
+            cls = decoder(cls,x)
         cls_len = cls.shape[0]
         cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         # x_final = rearrange(x,'b d t -> b t d',b=B,t=T)

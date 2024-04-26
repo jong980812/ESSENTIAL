@@ -270,6 +270,8 @@ def get_args_cil():
     parser.add_argument('--ba_dim', default=192, type=int)
     parser.add_argument('--temp_mode', default='ba', type=str)
     parser.add_argument('--unfreeze_layers_after_base', default=None, nargs='+', type=str)
+    parser.add_argument('--ssv2_first_finetune', default=None, type=str)
+    
     
     
 
@@ -595,7 +597,10 @@ def main(args, ds_init):
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
         
-
+    if args.ssv2_first_finetune:
+        check = torch.load(args.ssv2_first_finetune,'cpu')['model']
+        print(model.load_state_dict(check))
+        del check
     model.to(device)
     model_without_ddp = model
 

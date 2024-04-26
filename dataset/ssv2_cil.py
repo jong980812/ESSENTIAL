@@ -62,7 +62,7 @@ class SSVideoClsDataset(Dataset):
                 args.memory_video_path = json.load(file)
             self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
             self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
-            self.mode ='train'
+            # self.mode ='train'
 
 
 
@@ -163,6 +163,8 @@ class SSVideoClsDataset(Dataset):
                     sample = self.dataset_samples[index]
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
+            if self.rehearsal:
+                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],{} 
             return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':
