@@ -201,6 +201,8 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
         elif self.temp_mode=='attention':
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
+            if get_frame:
+                return self.attention(ln_cls,ln1,need_weights=True)
             cls = cls + self.drop_path(self.attention(ln_cls,ln1))
         elif self.temp_mode =='ba':
             ln_cls = self.ln_cls(self.time_down(cls))
