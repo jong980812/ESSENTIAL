@@ -73,13 +73,14 @@ class ResidualAttentionBlock(nn.Module):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, b = 1):
         if self.adapter:
             ## x shape [HW+1, BT, D]
-
+            B =b
             n, bt, d = x.shape
+            T = bt//B
             ## temporal adaptation
-            xt = rearrange(x, 'n (b t) d -> t (b n) d', t=self.num_frames)
+            xt = rearrange(x, 'n (b t) d -> t (b n) d', t=T)
             if self.num_tadapter == 2:
                 xt = self.T_Adapter(self.attention(self.T_Adapter_in(self.ln_1(xt))))
             else:
@@ -106,8 +107,10 @@ class Transformer(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path, self.layers)]
         self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp,adapter = (i) in self.adapter_layers) for i in range(layers)])
 
-    def forward(self, x: torch.Tensor):
-        return self.resblocks(x)
+    def forward(self, x: torch.Tensor,b = 1):
+        for i,block in enumerate(self.resblocks):
+            x = block(x=x,b=b)
+        return x
     def initial_adapter(self,init_scale):
         for n, m in self.resblocks.named_modules():
             if 'Adapter' in n:
@@ -183,14 +186,16 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
                     nn.init.constant_(m2.bias, 0)
     def attention(self, q: torch.Tensor,kv:torch.Tensor, need_weights=False):
         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
-        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1]
-    def forward(self, cls: torch.Tensor,x: torch.Tensor):
+        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1].topk(8,-1).indices.sort().values
+    def forward(self, cls: torch.Tensor,x: torch.Tensor,get_frame=False):
         #입력 cls_token B,T,D
         B = x.shape[1]# X: T,B,D
         # cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         if self.temp_mode=='transformer':
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
+            if get_frame:
+                return self.attention(ln_cls,ln1,need_weights=True)
             cls = cls + self.drop_path(self.attention(ln_cls,ln1))
             cls = cls + self.drop_path(self.mlp(self.ln_2(cls)))
         elif self.temp_mode=='attention':
@@ -220,9 +225,9 @@ class AIM_base_decoder(nn.Module):
         self.num_frames = num_frames
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
         self.order = args.order
-        embed_dim = 768
+        self.embed_dim = 768
         if self.order:
-            self.temp_head = nn.Linear(embed_dim, num_frames)
+            self.temp_head = nn.Linear(self.embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
@@ -239,7 +244,7 @@ class AIM_base_decoder(nn.Module):
             self.head = nn.ModuleList()
             for mask in class_mask:
                 n_class = len(mask)
-                head= nn.Linear(embed_dim,n_class)
+                head= nn.Linear(self.embed_dim,n_class)
                 trunc_normal_(head.weight, std=.02)
                 self.head.append(head)
             self.init_weights(pretrained='clip')
@@ -247,7 +252,7 @@ class AIM_base_decoder(nn.Module):
                 head.weight.data.mul_(init_scale)
                 head.bias.data.mul_(init_scale)
         else:
-            self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+            self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
             trunc_normal_(self.head.weight, std=.02)
             self.init_weights(pretrained='clip')
             self.head.weight.data.mul_(init_scale)
@@ -256,7 +261,7 @@ class AIM_base_decoder(nn.Module):
             self.cos_loss = AngularPenaltySMLoss('cosface')
             self.cos_temp = args.cos_temp
             init_scale = 1.0
-            self.head = nn.Linear(embed_dim, num_classes,bias=False) if num_classes > 0 else nn.Identity()
+            self.head = nn.Linear(self.embed_dim, num_classes,bias=False) if num_classes > 0 else nn.Identity()
             trunc_normal_(self.head.weight, std=.02)
             self.head.weight.data.mul_(init_scale)
         self.dropout_ratio = dropout_ratio
@@ -365,8 +370,9 @@ class AIM_base_decoder(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor, train=False,task_id =-1):
+    def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False):
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
+        temporal_embedding=self.temporal_embedding 
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
             x = x.unsqueeze(2)
         B, C, T, H, W = x.shape 
@@ -381,25 +387,37 @@ class AIM_base_decoder(nn.Module):
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
+        x = self.transformer(x,B)
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         
-        
+        #!
+        if get_frame:
+            temporal_embedding = F.interpolate(
+                temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
+            ).squeeze(1)
+    
+        #!
         '''
         x는 원래 CLIP으로 부터 나온 CLS 토큰들
         cls는 decoder를 위한 새로운 CLS token. 
         '''
         cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         cls_and_x = torch.cat([cls,x],1)# B, T+1, D
-        cls_and_x = cls_and_x + self.temporal_embedding
+        cls_and_x = cls_and_x + temporal_embedding
         cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
         cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
         cls = cls.unsqueeze(0)
-        for i, decoder in enumerate(self.decoder_transformer_for_cls):
-            cls = decoder(cls,x)
+        if get_frame:
+            for i, decoder in enumerate(self.decoder_transformer_for_cls):
+                frame_index = decoder(cls,x,get_frame)
+            return frame_index,T
+        else:
+            for i, decoder in enumerate(self.decoder_transformer_for_cls):
+                cls = decoder(cls,x)
+            
         cls_len = cls.shape[0]
         cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         # x_final = rearrange(x,'b d t -> b t d',b=B,t=T)

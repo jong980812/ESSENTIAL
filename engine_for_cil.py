@@ -105,8 +105,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
         
-        if args.inference and (task_id<(args.num_tasks-1)):
-            continue
+        # if args.inference and (task_id<(args.num_tasks-1)):
+        #     continue
         #!************************ Traininig *************************************
         Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
         checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_start_checkpoint.pth'.format(task_id+1))
@@ -154,9 +154,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         
         #!
         #!************************ Rehearsal *************************************
-        if args.memory_size > 0:# and task_id > 0:
-            if args.inference:
-                break
+        if args.memory_size > 0 and not args.inference:# and task_id > 0:
             # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
             # print(unfreeze_list)
             # print('Freeze for rehearsal')
@@ -205,7 +203,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             model.module.train()
         # model, unfreeze_list = unfreeze_block(model,['head','Adapter'])  
         # print(unfreeze_list)
-            
+        if args.inference:
+            val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False, get_all_frame=True)
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         acc_list.append(val_stats['stat_matrix'].tolist())
@@ -428,17 +428,30 @@ def get_loss_scale_for_deepspeed(model):
 
 
 
-
 @torch.no_grad()
 def evaluate(model: torch.nn.Module,  data_loader, 
             device, task_id=-1,all_mask = None, class_mask=None, args=None,header=None,til=False
-            ,selector = None):
-    criterion = torch.nn.CrossEntropyLoss()
-
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    
-    # switch to evaluation mode
+            ,selector = None,get_all_frame=False):
     model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    if get_all_frame:
+        with torch.no_grad():
+            for batch in metric_logger.log_every(data_loader, 10, header):
+                videos = batch[0]
+                target = batch[1]            
+                videos = videos.to(device, non_blocking=True)
+                    # for class_index, classes in enumerate(all_mask):
+                    #     for c in classes:
+                    #         target[target == c] = class_index
+                target = target.to(device, non_blocking=True)
+
+                # compute output
+
+                with torch.cuda.amp.autocast():
+                    frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
+                print(f'Index: {frame_index},   {num_frames}')
+            return None
+    criterion = torch.nn.CrossEntropyLoss()
 
     with torch.no_grad():
         for batch in metric_logger.log_every(data_loader, 10, header):
@@ -482,27 +495,32 @@ def evaluate(model: torch.nn.Module,  data_loader,
 
 @torch.no_grad()
 def evaluate_till_now(model: torch.nn.Module, data_loader, 
-                    device, task_id=-1, class_mask=None, acc_matrix=None, args=None,test_mode=False):
+                    device, task_id=-1, class_mask=None, acc_matrix=None, args=None,test_mode=False,get_all_frame = False):
     stat_matrix = np.zeros((3, args.num_tasks)) # 3 for Acc@1, Acc@5, Loss
     import random
     num_task = args.num_tasks
     for i in range(task_id+1):
         #! til은 adapter selection 하기 위함.
         mask = class_mask[i]
-        if test_mode:
-            header = 'Test: [Task {}]'.format(i + 1)
-            test_stats = evaluate(model=model, data_loader=data_loader[i]['test'], 
-                                device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
+        if get_all_frame:
+            header = 'Frame_index: [Task {}]'.format(i + 1)
+            _ = evaluate(model=model, data_loader=data_loader[i]['for_cls'], 
+                                device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None,get_all_frame=get_all_frame)
         else:
-            header = 'VAL: [Task {}]'.format(i + 1)
-            test_stats = evaluate(model=model, data_loader=data_loader[i]['val'], 
-                                device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
+            if test_mode:
+                header = 'Test: [Task {}]'.format(i + 1)
+                test_stats = evaluate(model=model, data_loader=data_loader[i]['test'], 
+                                    device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
+            else:
+                header = 'VAL: [Task {}]'.format(i + 1)
+                test_stats = evaluate(model=model, data_loader=data_loader[i]['val'], 
+                                    device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
 
-        stat_matrix[0, i] = test_stats['Acc@1']
-        stat_matrix[1, i] = test_stats['Acc@5']
-        stat_matrix[2, i] = test_stats['Loss']
+            stat_matrix[0, i] = test_stats['Acc@1']
+            stat_matrix[1, i] = test_stats['Acc@5']
+            stat_matrix[2, i] = test_stats['Loss']
 
-        acc_matrix[i, task_id] = test_stats['Acc@1']
+            acc_matrix[i, task_id] = test_stats['Acc@1']
     
     avg_stat = np.divide(np.sum(stat_matrix, axis=1), task_id+1)
 

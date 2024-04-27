@@ -13,7 +13,7 @@ def is_double_list(obj):
     return False
 
 
-def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
+def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,all_frames=False):
     '''
     num crop은 test mode 구현 안된 관계로 1로 하드코딩.
     data_path는 cluster별로 다르기 때문에 하드코딩. 돌리기전에 Check
@@ -85,7 +85,8 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False):
             new_width=320,
             args=args,
             task_id = task_id,
-            rehearsal=rehearsal
+            rehearsal=rehearsal,
+            all_frames=all_frames
             )
     elif args.data_set == 'UCF101':
 
@@ -191,6 +192,8 @@ def build_continual_dataloader(args):
     for i in range(args.num_tasks):
         dataset_train = build_dataset(is_train=True, test_mode=False, args=args,anno_list=anno_list['train'][i],task_id=i)
         dataset_val = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['val'][i],task_id=i)
+        dataset_for_cls = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['val'][i],task_id=i,all_frames = True)
+        
         # if args.data_set == 'SSV2':
         args.n_videos.append(len(dataset_val))
         # TODO Test views
@@ -223,6 +226,8 @@ def build_continual_dataloader(args):
                         'equal num of samples per-process.')
             sampler_val = torch.utils.data.DistributedSampler(
                 dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+            sampler_for_cls = torch.utils.data.DistributedSampler(
+                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
             sampler_test = torch.utils.data.DistributedSampler(
                 dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=False)
         data_loader_train = torch.utils.data.DataLoader(
@@ -247,6 +252,13 @@ def build_continual_dataloader(args):
             pin_memory=args.pin_mem,
             drop_last=False
         )
+        data_loader_for_cls = torch.utils.data.DataLoader(
+            dataset_for_cls, sampler=sampler_for_cls,
+            batch_size=1,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=False
+        )
         data_loader_test = torch.utils.data.DataLoader(
             dataset_test, sampler=sampler_test,
             batch_size=args.batch_size,
@@ -255,5 +267,5 @@ def build_continual_dataloader(args):
             drop_last=False
         )
 
-        dataloader.append({'train': data_loader_train, 'val': data_loader_val, 'test':data_loader_test,'rehearsal': data_loader_rehearsal})
+        dataloader.append({'train': data_loader_train, 'val': data_loader_val, 'test':data_loader_test,'rehearsal': data_loader_rehearsal,'for_cls':data_loader_for_cls})
     return dataloader, class_mask ,n_vids_per_task,class_name_list
