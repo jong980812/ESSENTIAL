@@ -18,7 +18,7 @@ class SSVideoClsDataset(Dataset):
                 crop_size=224, short_side_size=256, new_height=256,
                 new_width=340, keep_aspect_ratio=True, num_segment=1,
                 num_crop=1, test_num_segment=10, test_num_crop=3, args=None,task_id =-1,
-                 loader='decord',rehearsal=False,return_text=False):
+                 loader='decord',rehearsal=False,return_text=False,all_frames=False):
         self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
@@ -37,7 +37,7 @@ class SSVideoClsDataset(Dataset):
         self.rand_erase = False
         self.rehearsal = rehearsal
         self.return_text=False
-        
+        self.all_frames = all_frames
         if self.mode in ['train']:
             self.aug = True
             if self.args.reprob > 0:
@@ -155,7 +155,7 @@ class SSVideoClsDataset(Dataset):
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample,self.rehearsal)
+            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -263,7 +263,7 @@ class SSVideoClsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
         if not (os.path.exists(fname)):
@@ -308,7 +308,9 @@ class SSVideoClsDataset(Dataset):
             all_index += list(np.sort(np.random.randint(len(vr), size=self.num_segment)))
         else:
             all_index += list(np.zeros((self.num_segment,)))
-        all_index = list(np.array(all_index)) 
+        all_index = list(np.array(all_index))
+        if all_frames:
+            all_index = [i for i in range(len(vr))] 
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
         return buffer

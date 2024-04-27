@@ -203,6 +203,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             model.module.train()
         # model, unfreeze_list = unfreeze_block(model,['head','Adapter'])  
         # print(unfreeze_list)
+        
         if args.inference:
             val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False, get_all_frame=True)
@@ -438,7 +439,8 @@ def evaluate(model: torch.nn.Module,  data_loader,
         with torch.no_grad():
             for batch in metric_logger.log_every(data_loader, 10, header):
                 videos = batch[0]
-                target = batch[1]            
+                target = batch[1]
+                vname = batch[2]          
                 videos = videos.to(device, non_blocking=True)
                     # for class_index, classes in enumerate(all_mask):
                     #     for c in classes:
@@ -449,7 +451,7 @@ def evaluate(model: torch.nn.Module,  data_loader,
 
                 with torch.cuda.amp.autocast():
                     frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
-                print(f'Index: {frame_index},   {num_frames}')
+                print(f'Index: {frame_index},   {num_frames} {vname}')
             return None
     criterion = torch.nn.CrossEntropyLoss()
 

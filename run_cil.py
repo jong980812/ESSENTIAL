@@ -597,7 +597,7 @@ def main(args, ds_init):
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
         
-    if args.ssv2_first_finetune:
+    if args.ssv2_first_finetune is not None:
         check = torch.load(args.ssv2_first_finetune,'cpu')['model']
         print(model.load_state_dict(check))
         del check
