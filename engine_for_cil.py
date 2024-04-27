@@ -118,7 +118,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
         utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
-            break
             if args.joint or args.inference:
                 break
             # break
