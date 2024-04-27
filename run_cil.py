@@ -271,6 +271,7 @@ def get_args_cil():
     parser.add_argument('--temp_mode', default='ba', type=str)
     parser.add_argument('--unfreeze_layers_after_base', default=None, nargs='+', type=str)
     parser.add_argument('--ssv2_first_finetune', default=None, type=str)
+    parser.add_argument('--get_frame_index', action='store_true', default=False, help='')
     
     
     

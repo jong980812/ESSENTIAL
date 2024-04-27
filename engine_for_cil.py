@@ -118,6 +118,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
         utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
+            break
             if args.joint or args.inference:
                 break
             # break
@@ -151,7 +152,13 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                         }
                 utils.save_on_master(state_dict, checkpoint_path)
         #! Saving CLS TOken
-        
+        if args.get_frame_index and utils.is_main_process():
+            # val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+            #         task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False, get_all_frame=True)
+            save_frame_index(model=model,data_loader=data_loader,device = device, task_id=task_id, class_mask = None, args = args)
+        torch.distributed.barrier()
+        data_loader[task_id]['rehearsal'].dataset.update_rehearsal(task_id,args)
+        torch.distributed.barrier()
         #!
         #!************************ Rehearsal *************************************
         if args.memory_size > 0 and not args.inference:# and task_id > 0:
@@ -204,9 +211,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         # model, unfreeze_list = unfreeze_block(model,['head','Adapter'])  
         # print(unfreeze_list)
         
-        if args.inference:
-            val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False, get_all_frame=True)
+
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         acc_list.append(val_stats['stat_matrix'].tolist())
@@ -539,8 +544,62 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
     print(result_str)
 
     return test_stats
+import copy
+@torch.no_grad()
+def save_frame_index(model: torch.nn.Module, 
+                    data_loader, 
+                    device, 
+                    task_id=-1, 
+                    class_mask=None, 
+                    args=None,
+                    ):
+    '''
+    task_id 들어오면 해당 txt읽어야함.
+    '''
+    # with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+    #     label_array = copy.deepcopy(args.memory_video_path['label_array'])
+    #     dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
+    memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[]}
+    model.eval()
+    re_dataset = data_loader[task_id]['rehearsal'].dataset
+    re_dataset.all_frames = True
+    num_tasks = 1#utils.get_world_size()
+    global_rank = utils.get_rank()
+    sampler_rehearsal = torch.utils.data.DistributedSampler(re_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True)
+    data_loader_rehearsal = torch.utils.data.DataLoader(
+                re_dataset, sampler=sampler_rehearsal,
+                batch_size=1,#!
+                num_workers=args.num_workers,
+                pin_memory=args.pin_mem,
+                drop_last=False if len(re_dataset)<args.batch_size*utils.get_world_size() else True,#total batch가 rehearsal보다 크면 .
+            )
+    header = 'Saving Frame Index: [Task {} Rehearsal Loader]'.format(task_id + 1)
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    with torch.no_grad():
+        for batch in metric_logger.log_every(data_loader_rehearsal, 100, header):
+            videos = batch[0]
+            target = batch[1]
+            vname = batch[2]          
+            videos = videos.to(device, non_blocking=True)
+                # for class_index, classes in enumerate(all_mask):
+                #     for c in classes:
+                #         target[target == c] = class_index
+            target = target.to(device, non_blocking=True)
 
-    
+            # compute output
+
+            with torch.cuda.amp.autocast():
+                frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
+            video_name = vname[0]+'.mp4'
+            label = int(target.cpu())
+            selected_index = frame_index.squeeze(0).squeeze(0).cpu().numpy()
+            memory_video_path['dataset_samples'].append(video_name)
+            memory_video_path['label_array'].append(label)
+            memory_video_path['selected_frame'].append(selected_index.tolist())
+            # print(f'Index: {frame_index},   {num_frames} {vname}')
+    with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
+            json.dump(memory_video_path, file)
+    re_dataset.all_frames = False
 
 
 @torch.no_grad()

@@ -47,6 +47,7 @@ class SSVideoClsDataset(Dataset):
         self.label_array = []
         self.dataset_samples = []
         self.label_name_array = []
+        self.selected_frame = []
         if not rehearsal:
             for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
                 for video_info in videos:
@@ -122,7 +123,13 @@ class SSVideoClsDataset(Dataset):
                         self.test_dataset.append(self.dataset_samples[idx])
                         self.test_seg.append((ck, cp))
 
-
+    def update_rehearsal(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+            args.memory_video_path = json.load(file)
+            self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
+            self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
+            self.selected_frame = copy.deepcopy(args.memory_video_path['selected_frame'])
+        
     def __getitem__(self, index):
         if self.mode == 'train':
             args = self.args 
@@ -155,7 +162,7 @@ class SSVideoClsDataset(Dataset):
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames)
+            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -263,7 +270,7 @@ class SSVideoClsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
         if not (os.path.exists(fname)):
@@ -311,6 +318,8 @@ class SSVideoClsDataset(Dataset):
         all_index = list(np.array(all_index))
         if all_frames:
             all_index = [i for i in range(len(vr))] 
+        if len(self.selected_frame)>0:#! update되었단 뜻.
+            all_index = self.selected_frame[index]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
         return buffer
