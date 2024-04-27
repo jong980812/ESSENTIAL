@@ -228,6 +228,7 @@ class AIM_base_decoder(nn.Module):
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
         self.order = args.order
         self.embed_dim = 768
+        self.ba_layers =args.ba_layers
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
@@ -414,7 +415,10 @@ class AIM_base_decoder(nn.Module):
         cls = cls.unsqueeze(0)
         if get_frame:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                frame_index = decoder(cls,x,get_frame)
+                if i < (self.ba_layers-1):
+                    cls = decoder(cls,x)
+                else:
+                    frame_index = decoder(cls,x,get_frame)
             return frame_index,T
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
