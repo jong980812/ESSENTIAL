@@ -73,6 +73,7 @@ class KineticsDataset(Dataset):
         self.label_array = []
         self.dataset_samples = []
         self.label_name_array = []
+        self.selected_frame = []
         if not rehearsal:
             for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
                 for video_info in videos:
