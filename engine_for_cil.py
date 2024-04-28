@@ -52,8 +52,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
         print(f"Start task training for {epochs} epochs")
-        if args.ssv2_first_finetune is not None and (task_id<1):
-            continue
+
         if args.joint:
             if task_id< args.num_tasks-1:
                 continue
@@ -118,6 +117,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
         utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
+            if args.ssv2_first_finetune is not None and (task_id<1):
+                break
             if args.joint or args.inference:
                 break
             # break

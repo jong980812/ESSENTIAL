@@ -419,6 +419,15 @@ class AIM_base_decoder(nn.Module):
                     cls = decoder(cls,x)
                 else:
                     frame_index = decoder(cls,x,get_frame)
+            density = calculate_density(frame_index,T)
+            if density>20.0:
+                new_frame_index = expand_indices_around_center(frame_index,T, density/20.0)
+                frame_index = new_frame_index
+            # indices = frame_index[0, 0]
+            # gaps = indices[1:] - indices[:-1]
+            # average_gap = gaps.float().mean()
+            # density = T / average_gap
+                print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
             return frame_index,T
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
@@ -508,3 +517,36 @@ class AngularPenaltySMLoss(nn.Module):
             denominator = torch.exp(numerator) + torch.sum(torch.exp(self.s * excl), dim=1)
             L = numerator - torch.log(denominator)
             return -torch.mean(L)
+
+
+
+def expand_indices_around_center(frame_indices, T, expand_factor):
+    indices = frame_indices[0, 0].cpu()
+    first, last = indices[0], indices[-1]
+    length = len(indices)
+    # 첫 인덱스가 시작에 가까운지 확인
+    if first < T * 0.1:
+        # 첫 인덱스가 전체의 10% 이내일 경우: 뒤로 확장
+        offsets = torch.arange(length).float() * expand_factor
+        new_indices = indices.float() + offsets
+    # 마지막 인덱스가 끝에 가까운지 확인
+    elif last > T * 0.9:
+        # 마지막 인덱스가 전체의 90% 이상일 경우: 앞으로 확장
+        offsets = torch.arange(length).float() * expand_factor
+        new_indices = indices.float() - offsets.flip(0)  # 뒤집힌 순서로 감소
+    else:
+        # 중심점을 기준으로 확장
+        center = indices.float().mean()
+        offsets = (torch.arange(length) - length // 2).float() * expand_factor
+        new_indices = (indices - center) + offsets + center
+
+    # 결과를 다시 정수로 변환하고, 0과 T-1 범위 내로 제한
+    new_indices = new_indices.round().int()
+    new_indices = torch.clamp(new_indices, 0, T-1)
+    return new_indices.unsqueeze(0).unsqueeze(0)
+def calculate_density(frame_indices, T):
+    indices = frame_indices[0, 0]
+    gaps = indices[1:] - indices[:-1]
+    average_gap = gaps.float().mean()
+    density = T / average_gap
+    return density.item()
