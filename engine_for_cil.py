@@ -151,13 +151,12 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                         }
                 utils.save_on_master(state_dict, checkpoint_path)
         #! Saving CLS TOken
-        if args.get_frame_index and utils.is_main_process():
-            # val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-            #         task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False, get_all_frame=True)
-            save_frame_index(model=model,data_loader=data_loader,device = device, task_id=task_id, class_mask = None, args = args)
-        torch.distributed.barrier()
-        data_loader[task_id]['rehearsal'].dataset.update_rehearsal(task_id,args)
-        torch.distributed.barrier()
+        if args.get_frame_index:
+            if utils.is_main_process():
+                save_frame_index(model=model,data_loader=data_loader,device = device, task_id=task_id, class_mask = None, args = args)
+            torch.distributed.barrier()
+            data_loader[task_id]['rehearsal'].dataset.update_rehearsal(task_id,args)
+            torch.distributed.barrier()
         #!
         #!************************ Rehearsal *************************************
         if args.memory_size > 0 and not args.inference:# and task_id > 0:
