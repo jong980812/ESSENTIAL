@@ -32,7 +32,8 @@ class KineticsDataset(Dataset):
                  frame_sample_rate=2, crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
                  num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,
-                 loader='decord',rehearsal=False,return_text=False
+                 loader='decord',rehearsal=False,return_text=False,
+                 all_frames=False
                  ):
         self.anno_list = anno_list
         self.data_path = data_path
@@ -53,6 +54,7 @@ class KineticsDataset(Dataset):
         self.rehearsal=rehearsal
         self.rand_erase = False
         self.return_text=False
+        self.all_frames = all_frames
         if loader == 'decord':
             self.loader = self.loadvideo_decord
         elif loader =='pyav':
@@ -86,7 +88,7 @@ class KineticsDataset(Dataset):
                 args.memory_video_path = json.load(file)
             self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
             self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
-            self.mode ='train'
+            # self.mode ='train'
 
 
 
@@ -181,7 +183,7 @@ class KineticsDataset(Dataset):
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample,self.rehearsal)
+            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -189,6 +191,8 @@ class KineticsDataset(Dataset):
                     sample = self.dataset_samples[index]
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
+            if self.rehearsal:
+                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],{} 
             return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':
@@ -289,7 +293,7 @@ class KineticsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample,rehearsal=False, sample_rate_scale=1):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
 
@@ -340,7 +344,10 @@ class KineticsDataset(Dataset):
                 index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
             index = index + i*seg_len
             all_index.extend(list(index))
-
+        if all_frames:
+            all_index = [i for i in range(len(vr))] 
+        if len(self.selected_frame)>0:#! update되었단 뜻.
+            all_index = self.selected_frame[index]
         all_index = all_index[::int(sample_rate_scale)]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
