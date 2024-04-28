@@ -420,14 +420,16 @@ class AIM_base_decoder(nn.Module):
                 else:
                     frame_index = decoder(cls,x,get_frame)
             density = calculate_density(frame_index,T)
-            if density>10.0:
-                new_frame_index = expand_indices_around_center(frame_index,T, density/10.0)
+            if density>20.0:
+                new_frame_index = expand_indices_around_center(frame_index,T, density/20.0)
+                print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
                 frame_index = new_frame_index
+            else:
+                frame_index = torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             # indices = frame_index[0, 0]
             # gaps = indices[1:] - indices[:-1]
             # average_gap = gaps.float().mean()
             # density = T / average_gap
-                print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
             return frame_index,T
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):

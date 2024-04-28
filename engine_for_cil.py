@@ -206,9 +206,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             num_training_steps_per_epoch=num_training_steps_per_epoch, 
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
-            model.module.train()
-        # model, unfreeze_list = unfreeze_block(model,['head','Adapter'])  
-        # print(unfreeze_list)
         
 
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
