@@ -272,10 +272,12 @@ def get_args_cil():
     parser.add_argument('--unfreeze_layers_after_base', default=None, nargs='+', type=str)
     parser.add_argument('--ssv2_first_finetune', default=None, type=str)
     parser.add_argument('--get_frame_index', action='store_true', default=False, help='')
-    
-    
-    
-
+    parser.add_argument('--fs_topk', default=8, type=int)
+    parser.add_argument('--n_token_rehearsal', default=8, type=int)
+    parser.add_argument('--debugging', action='store_true', default=False)#! No train 
+    parser.add_argument('--handcrafted_selection', action='store_true', default=False)#! 코딩중인 Frame selection
+    parser.add_argument('--selected_selection', action='store_true', default=False)#! 코딩중인 Frame selection
+    parser.add_argument('--fs_density', action='store_true', default=False)#! 코딩중인 Frame selection
     
 
 

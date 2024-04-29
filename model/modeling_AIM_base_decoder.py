@@ -142,11 +142,11 @@ class Transformer(nn.Module):
                             m2.weight.requires_grad_(True)
                             m2.bias.requires_grad_(True)
 class Decoder_ResidualAttentionBlock_time(nn.Module):
-    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.2,dim_mlp=192):
+    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.2,dim_mlp=192,fs_topk=8):
         super().__init__()
         self.temp_mode = temp_mode
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
+        self.fs_topk = fs_topk
         if self.temp_mode=='transformer':
             d_model = 768
             n_head = 12
@@ -186,7 +186,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
                     nn.init.constant_(m2.bias, 0)
     def attention(self, q: torch.Tensor,kv:torch.Tensor, need_weights=False):
         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
-        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1].topk(8,-1).indices.sort().values
+        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1].topk(self.fs_topk,-1).indices.sort().values
     def forward(self, cls: torch.Tensor,x: torch.Tensor,get_frame=False):
         #입력 cls_token B,T,D
         B = x.shape[1]# X: T,B,D
@@ -229,15 +229,20 @@ class AIM_base_decoder(nn.Module):
         self.order = args.order
         self.embed_dim = 768
         self.ba_layers =args.ba_layers
+        self.fs_topk = args.fs_topk
+        self.n_token_rehearsal = args.n_token_rehearsal
+        self.handcrafted_selection = args.handcrafted_selection
+        self.selected_selection = args.selected_selection
+        self.fs_density = args.fs_density
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
+        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         # self.transformer_for_cls = Decoder_ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
         self.decoder_cls = nn.Parameter(scale * torch.randn(width))
-        self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp) for _ in range(args.ba_layers)])
+        self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
         
@@ -375,7 +380,6 @@ class AIM_base_decoder(nn.Module):
 
     def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False):
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
-        temporal_embedding=self.temporal_embedding 
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
             x = x.unsqueeze(2)
         B, C, T, H, W = x.shape 
@@ -396,13 +400,21 @@ class AIM_base_decoder(nn.Module):
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         
-        #!
-        if get_frame:
+        if T<8:
+            x = torch.repeat_interleave(x, 8//T, dim=1)
+            T=8
+        temporal_embedding=self.temporal_embedding 
+        if temporal_embedding.shape[1]!=(T+1):
             temporal_embedding = F.interpolate(
                 temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
             ).squeeze(1)
+        # #!
+        # if get_frame:
+        #     temporal_embedding = F.interpolate(
+        #         temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
+        #     ).squeeze(1)
     
-        #!
+        # #!
         '''
         x는 원래 CLIP으로 부터 나온 CLS 토큰들
         cls는 decoder를 위한 새로운 CLS token. 
@@ -419,14 +431,23 @@ class AIM_base_decoder(nn.Module):
                     cls = decoder(cls,x)
                 else:
                     frame_index = decoder(cls,x,get_frame)
-            density = calculate_density(frame_index,T)
-            if density>20.0:
-                new_frame_index = expand_indices_around_center(frame_index,T, density/20.0)
-                print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
-                frame_index = new_frame_index
-            else:
-                average_duration = T // 8
-                frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            if self.fs_density:
+                density = calculate_density(frame_index,T)
+                if density>20.0:
+                    new_frame_index = expand_indices_around_center(frame_index,T, density/20.0)
+                    # print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
+                    frame_index = new_frame_index
+                else:
+                    average_duration = T // 8
+                    frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            if self.handcrafted_selection:
+                str_idx = int(T * 1/3)
+                end_idx = int(T * 2/3)
+                # frame_index 텐서를 생성합니다.
+                frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            elif self.selected_selection:
+                frame_index = torch.tensor([frame_index[0,0,0], frame_index[0,0,1]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                
             # indices = frame_index[0, 0]
             # gaps = indices[1:] - indices[:-1]
             # average_gap = gaps.float().mean()

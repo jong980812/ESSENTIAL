@@ -119,7 +119,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         for epoch in range(epochs): 
             if args.ssv2_first_finetune is not None and (task_id<1):
                 break
-            if args.joint or args.inference:
+            if args.joint or args.inference or args.debugging:
                 break
             # break
             # if epoch == epochs-5 and task_id>0:
@@ -191,8 +191,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             model.module.transformer.eval()
             model.module.conv1.eval()
             for epoch in range(args.rehearsal_epochs):
-                if (args.data_set=='SSV2') and (task_id==0):
-                    break 
+                # if (args.data_set=='SSV2') and (task_id==0):
+                #     break 
                 if args.distributed:
                     data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
                 header = f'Task {task_id+1}/{args.num_tasks}  Rehearsal Epoch: [{epoch} / {args.rehearsal_epochs}]'
