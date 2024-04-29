@@ -400,9 +400,9 @@ class AIM_base_decoder(nn.Module):
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         
-        if T<8:
-            x = torch.repeat_interleave(x, 8//T, dim=1)
-            T=8
+        # if T<8:
+        #     x = torch.repeat_interleave(x, 8//T, dim=1)
+        #     T=8
         temporal_embedding=self.temporal_embedding 
         if temporal_embedding.shape[1]!=(T+1):
             temporal_embedding = F.interpolate(
