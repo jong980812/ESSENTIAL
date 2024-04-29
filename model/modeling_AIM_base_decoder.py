@@ -420,7 +420,7 @@ class AIM_base_decoder(nn.Module):
                 else:
                     frame_index = decoder(cls,x,get_frame)
             density = calculate_density(frame_index,T)
-            if density>40.0:
+            if density>20.0:
                 new_frame_index = expand_indices_around_center(frame_index,T, density/20.0)
                 print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
                 frame_index = new_frame_index
