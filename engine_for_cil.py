@@ -207,7 +207,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
         
-
+        continue
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         acc_list.append(val_stats['stat_matrix'].tolist())
@@ -552,9 +552,12 @@ def save_frame_index(model: torch.nn.Module,
     '''
     task_id 들어오면 해당 txt읽어야함.
     '''
-    # with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
-    #     label_array = copy.deepcopy(args.memory_video_path['label_array'])
-    #     dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
+    if task_id!=0:
+        with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id}.txt'), 'r') as file:
+            a = json.load(file)
+            # pre_label_array = a['label_array']
+            pre_dataset_samples = a['dataset_samples']
+            pre_selected_frame = a['selected_frame']
     memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[]}
     model.eval()
     re_dataset = data_loader[task_id]['rehearsal'].dataset
@@ -584,10 +587,17 @@ def save_frame_index(model: torch.nn.Module,
 
             # compute output
 
-            with torch.cuda.amp.autocast():
-                frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
             video_name = vname[0]+'.mp4'
             label = int(target.cpu())
+            if task_id!=0:
+                if (video_name in pre_dataset_samples):
+                    sample_index = pre_dataset_samples.index(video_name)
+                    memory_video_path['dataset_samples'].append(video_name)
+                    memory_video_path['label_array'].append(label)
+                    memory_video_path['selected_frame'].append(pre_selected_frame[sample_index])
+                    continue
+            with torch.cuda.amp.autocast():
+                frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
             selected_index = frame_index.squeeze(0).squeeze(0).cpu().numpy()
             memory_video_path['dataset_samples'].append(video_name)
             memory_video_path['label_array'].append(label)
