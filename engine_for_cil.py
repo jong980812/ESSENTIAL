@@ -207,7 +207,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
         
-        continue
+        # continue
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         acc_list.append(val_stats['stat_matrix'].tolist())
