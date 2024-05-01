@@ -225,7 +225,11 @@ class AIM_base_decoder(nn.Module):
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
-        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
+        self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
+        self.use_aim_weight = args.use_aim_weight
+        if args.use_aim_weight:
+            self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
+            
         self.order = args.order
         self.embed_dim = 768
         self.ba_layers =args.ba_layers
@@ -391,6 +395,16 @@ class AIM_base_decoder(nn.Module):
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
+        if self.use_aim_weight:
+            temporal_embedding=self.temporal_embedding 
+            if temporal_embedding.shape[1]!=(T):
+                temporal_embedding = F.interpolate(
+                    temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
+                ).squeeze(1)
+            n = x.shape[1]
+            x = rearrange(x, '(b t) n d -> (b n) t d', t=T)
+            x = x + temporal_embedding
+            x = rearrange(x, '(b n) t d -> (b t) n d', n=n)
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
@@ -403,15 +417,15 @@ class AIM_base_decoder(nn.Module):
         # if T<8:
         #     x = torch.repeat_interleave(x, 8//T, dim=1)
         #     T=8
-        temporal_embedding=self.temporal_embedding 
-        if temporal_embedding.shape[1]!=(T+1):
-            temporal_embedding = F.interpolate(
-                temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
+        decoder_temporal_embedding=self.decoder_temporal_embedding 
+        if decoder_temporal_embedding.shape[1]!=(T+1):
+            decoder_temporal_embedding = F.interpolate(
+                decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
             ).squeeze(1)
         # #!
         # if get_frame:
-        #     temporal_embedding = F.interpolate(
-        #         temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
+        #     decoder_temporal_embedding = F.interpolate(
+        #         decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
         #     ).squeeze(1)
     
         # #!
@@ -421,7 +435,7 @@ class AIM_base_decoder(nn.Module):
         '''
         cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         cls_and_x = torch.cat([cls,x],1)# B, T+1, D
-        cls_and_x = cls_and_x + temporal_embedding
+        cls_and_x = cls_and_x + decoder_temporal_embedding
         cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
         cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
         cls = cls.unsqueeze(0)
