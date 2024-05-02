@@ -18,7 +18,7 @@ class SSVideoClsDataset(Dataset):
                 crop_size=224, short_side_size=256, new_height=256,
                 new_width=340, keep_aspect_ratio=True, num_segment=1,
                 num_crop=1, test_num_segment=10, test_num_crop=3, args=None,task_id =-1,
-                 loader='decord',rehearsal=False,return_text=False,all_frames=False):
+                 loader='decord',rehearsal=False,return_text=False,all_frames=False,frame_sample_rate=2):
         self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
@@ -38,6 +38,9 @@ class SSVideoClsDataset(Dataset):
         self.rehearsal = rehearsal
         self.return_text=False
         self.all_frames = all_frames
+        self.get_val_sample = False
+        self.set_selection_frame = False
+        self.frame_sample_rate = frame_sample_rate
         if self.mode in ['train']:
             self.aug = True
             if self.args.reprob > 0:
@@ -93,6 +96,13 @@ class SSVideoClsDataset(Dataset):
 
 
         if (mode == 'train'):
+            self.val_transform = video_transforms.Compose([
+                video_transforms.Resize(self.short_side_size, interpolation='bilinear'),
+                video_transforms.CenterCrop(size=(self.crop_size, self.crop_size)),
+                volume_transforms.ClipToTensor(),
+                video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225])
+            ])
             pass
 
         elif (mode == 'validation'):
@@ -125,18 +135,27 @@ class SSVideoClsDataset(Dataset):
 
     def update_rehearsal(self,task_id,args):
         with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
-            args.memory_video_path = json.load(file)
-            self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
-            self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
-            self.selected_frame = copy.deepcopy(args.memory_video_path['selected_frame'])
-        
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+    def update_train_selected(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+    def aug_for_cls(self,flag = True):
+        self.get_val_sample = flag
+    def on_selection_frame(self,flag=True):
+        self.set_selection_frame = flag
     def __getitem__(self, index):
         if self.mode == 'train':
             args = self.args 
             scale_t = 1
 
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t) # T H W C
+            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during training".format(sample))
@@ -156,9 +175,13 @@ class SSVideoClsDataset(Dataset):
                     index_list.append(index)
                 return frame_list, label_list, index_list, {}
             else:
-                buffer = self._aug_frame(buffer, args)
+                if self.set_selection_frame:
+                    buffer = self.val_transform(buffer)
+                else:
+                    buffer = self._aug_frame(buffer, args)
+  
             
-            return buffer, self.label_array[index], index, {}
+            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], {}
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
@@ -305,17 +328,40 @@ class SSVideoClsDataset(Dataset):
         # handle temporal segments
         average_duration = len(vr) // self.num_segment
         all_index = []
-        if average_duration > 0:
-            if not rehearsal:
-                all_index += list(np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration,
-                                                                                                        size=self.num_segment))
+        uniform = False if random.random()>0.5 else True
+        if uniform:
+            if average_duration > 0:
+                if not rehearsal:
+                    all_index += list(np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration,
+                                                                                                            size=self.num_segment))
+                else:
+                    all_index += list(np.multiply(list(range(self.num_segment)), average_duration))
+            elif len(vr) > self.num_segment:
+                all_index += list(np.sort(np.random.randint(len(vr), size=self.num_segment)))
             else:
-                all_index += list(np.multiply(list(range(self.num_segment)), average_duration))
-        elif len(vr) > self.num_segment:
-            all_index += list(np.sort(np.random.randint(len(vr), size=self.num_segment)))
+                all_index += list(np.zeros((self.num_segment,)))
+            all_index = list(np.array(all_index))
         else:
-            all_index += list(np.zeros((self.num_segment,)))
-        all_index = list(np.array(all_index))
+            converted_len = int(self.num_segment * self.frame_sample_rate)
+            seg_len = len(vr)
+            # for i in range(self.num_segment):
+            if seg_len <= converted_len:
+                index = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
+                index = np.concatenate((index, np.ones(self.num_segment - seg_len // self.frame_sample_rate) * seg_len))
+                index = np.clip(index, 0, seg_len - 1).astype(np.int64)
+            else:
+                if not rehearsal:
+                    end_idx = np.random.randint(converted_len, seg_len)
+                else:
+                    points = np.linspace(converted_len, seg_len, 4, endpoint=True)
+                    end_idx = int(np.random.choice(points))
+                str_idx = end_idx - converted_len
+                index = np.linspace(str_idx, end_idx, num=self.num_segment)
+                index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
+            # index = index + i*seg_len
+            all_index.extend(list(index))     
+        
+        
         if all_frames:
             all_index = [i for i in range(len(vr))] 
         if len(self.selected_frame)>0:#! update되었단 뜻.

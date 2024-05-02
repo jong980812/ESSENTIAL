@@ -27,7 +27,6 @@ from utils import  multiple_samples_collate
 from utils import  get_args_cil
 from utils import unfreeze_block
 import utils
-from engine_for_cil import train_and_evaluate
 
 from model.modeling_AIM import AIM
 from model.modeling_CLIP import CLIP
@@ -259,6 +258,7 @@ def get_args_cil():
     parser.add_argument('--slow_learner', action='store_true', default=False, help='')
     parser.add_argument('--order', action='store_true', default=False, help='')
     parser.add_argument('--debias', action='store_true', default=False, help='')
+    parser.add_argument('--cls_aug', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
     
     
@@ -279,6 +279,10 @@ def get_args_cil():
     parser.add_argument('--selected_selection', action='store_true', default=False)#! 코딩중인 Frame selection
     parser.add_argument('--fs_density', action='store_true', default=False)#! 코딩중인 Frame selection
     parser.add_argument('--use_aim_weight', action='store_true', default=False)#! 코딩중인 Frame selection
+    
+    
+    #! frame selection in last epoch
+    parser.add_argument('--set_selection_frame', action='store_true', default=False)#! 코딩중인 Frame selection
     
 
 
@@ -735,7 +739,11 @@ def main(args, ds_init):
     print("="*40)
 #!************ Information *************
 
-    
+    if args.debugging:
+        from engine_for_debug import train_and_evaluate
+    else:
+        from engine_for_cil import train_and_evaluate
+        
     if args.finetune is not None:
         check = torch.load(args.finetune,'cpu')['model']
         print(model.module.load_state_dict(check))

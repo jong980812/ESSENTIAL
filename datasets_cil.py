@@ -87,7 +87,8 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             args=args,
             task_id = task_id,
             rehearsal=rehearsal,
-            all_frames=all_frames
+            all_frames=all_frames,
+            frame_sample_rate=args.sampling_rate,
             )
     elif args.data_set == 'UCF101':
 

@@ -83,17 +83,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.transformer.del_adapters()
                     model.to(args.device)
                     model_without_ddp = model.module
-                elif args.model == 'AIM_adapter':
-                    model.module.transformer.freeze_adapters()                
-                    model.module.transformer.add_adapters(mode=args.mode)
-                    model.module.transformer.del_adapters()
-                    model.to(args.device)
-                    model_without_ddp = model.module
-                # model.module.transformer_for_cls.initial_adapter()
-                # model.module.transformer.add_task()
-                elif args.model=='AIM_expand':
-                    model.module.transformer.make_new_adapter()
-                    model.to(args.device)
                 elif args.model=='AIM_custom' or args.model=='AIM_base' or args.model=='AIM_base_decoder':
                     model.module.unfreeze(args.unfreeze_layers_after_base)
                     model.to(args.device)
@@ -121,7 +110,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         for epoch in range(epochs): 
             if args.ssv2_first_finetune is not None and (task_id<1):
                 break
-            if args.joint or args.inference or args.debugging:
+            if args.joint or args.inference:# or args.debugging:
                 break
             # break
             # if epoch == epochs-5 and task_id>0:
@@ -220,31 +209,31 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             )
         
         # continue
-        val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
-                                    task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
-        acc_list.append(val_stats['stat_matrix'].tolist())
-        del val_stats['stat_matrix']
-        if args.output_dir and utils.is_main_process():
-            Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
+        # val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
+        #                             task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
+        # acc_list.append(val_stats['stat_matrix'].tolist())
+        # del val_stats['stat_matrix']
+        # if args.output_dir and utils.is_main_process():
+        #     Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
             
-            checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
-            state_dict = {
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'epoch': epoch,
-                    'args': args,
-                }
+        #     checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_checkpoint.pth'.format(task_id+1))
+        #     state_dict = {
+        #             'model': model_without_ddp.state_dict(),
+        #             'optimizer': optimizer.state_dict(),
+        #             'epoch': epoch,
+        #             'args': args,
+        #         }
 
-            utils.save_on_master(state_dict, checkpoint_path)
+        #     utils.save_on_master(state_dict, checkpoint_path)
     
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-            **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
-            **{f'val_{k}': v for k, v in val_stats.items()},
-            'epoch': epoch,}
-        print(log_stats)
-        if args.output_dir and utils.is_main_process():
-            with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
-                f.write(json.dumps(log_stats) + '\n')
+        # log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+        #     **{f'rehearsal_{k}': v for k, v in rehearsal_stats.items()},
+        #     **{f'val_{k}': v for k, v in val_stats.items()},
+        #     'epoch': epoch,}
+        # print(log_stats)
+        # if args.output_dir and utils.is_main_process():
+        #     with open(os.path.join(args.output_dir, '{}_stats.txt'.format(datetime.datetime.now().strftime('log_%Y_%m_%d_%H_%M'))), 'a') as f:
+        #         f.write(json.dumps(log_stats) + '\n')
 
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))

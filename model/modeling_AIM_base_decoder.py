@@ -210,6 +210,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             x_cls= self.time_act(self.attention(ln_cls,ln1))
             cls = self.time_up(x_cls)+cls
         return cls
+
 class AIM_base_decoder(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
@@ -217,7 +218,6 @@ class AIM_base_decoder(nn.Module):
         self.input_resolution = input_resolution
         self.pretrained = pretrained
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
-
         scale = width ** -0.5
         self.layers = layers
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
@@ -231,6 +231,11 @@ class AIM_base_decoder(nn.Module):
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
             
         self.order = args.order
+        if self.order:
+            self.temp_head = nn.Linear(width, num_frames)
+            trunc_normal_(self.temp_head.weight, std=.02)
+            self.temp_head.weight.data.mul_(init_scale)
+            self.temp_head.bias.data.mul_(init_scale)
         self.embed_dim = 768
         self.ba_layers =args.ba_layers
         self.fs_topk = args.fs_topk
@@ -238,6 +243,8 @@ class AIM_base_decoder(nn.Module):
         self.handcrafted_selection = args.handcrafted_selection
         self.selected_selection = args.selected_selection
         self.fs_density = args.fs_density
+        self.cls_aug = args.cls_aug
+        if self.cls_aug:self.aug_adapter = Adapter(width,192) 
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
@@ -249,6 +256,7 @@ class AIM_base_decoder(nn.Module):
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
+        self.mse = torch.nn.MSELoss()
         
         #!!
         self.each_head = args.each_head
@@ -383,6 +391,7 @@ class AIM_base_decoder(nn.Module):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
     def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False):
+            
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
             x = x.unsqueeze(2)
@@ -395,9 +404,11 @@ class AIM_base_decoder(nn.Module):
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
-        if self.use_aim_weight:
+        if self.use_aim_weight:#! AIM은 temporal embedding들어옴.
             temporal_embedding=self.temporal_embedding 
-            if temporal_embedding.shape[1]!=(T):
+            if self.cls_aug:
+                temporal_embedding = torch.cat([temporal_embedding,temporal_embedding],1)
+            elif temporal_embedding.shape[1]!=(T):
                 temporal_embedding = F.interpolate(
                     temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
                 ).squeeze(1)
@@ -414,6 +425,13 @@ class AIM_base_decoder(nn.Module):
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         
+        '''
+        x_norm = x / x.norm(dim=1, keepdim=True)
+        
+         코사인 유사도 맵 계산
+        cosine_similarity_map = torch.matmul(x_norm, x_norm.transpose(0, 1))
+        '''
+        # 
         # if T<8:
         #     x = torch.repeat_interleave(x, 8//T, dim=1)
         #     T=8
@@ -447,7 +465,7 @@ class AIM_base_decoder(nn.Module):
                     frame_index = decoder(cls,x,get_frame)
             if self.fs_density:
                 density = calculate_density(frame_index,T)
-                if density>20.0:
+                if density>40.0:
                     new_frame_index = expand_indices_around_center(frame_index,T, density/20.0)
                     # print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
                     frame_index = new_frame_index
@@ -462,7 +480,7 @@ class AIM_base_decoder(nn.Module):
                 # frame_index 텐서를 생성합니다.
                 frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             elif self.selected_selection:
-                frame_index = torch.tensor([frame_index[0,0,2], frame_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor([frame_index[0,0,1], frame_index[0,0,6]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 
             # indices = frame_index[0, 0]
             # gaps = indices[1:] - indices[:-1]
@@ -494,7 +512,7 @@ class AIM_base_decoder(nn.Module):
         # [N, in_channels]
             cls = self.head(cls)
         # x_final = (self.temp_head(x_final)) if self.order else None
-        return cls,(None)
+        return cls,None
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
