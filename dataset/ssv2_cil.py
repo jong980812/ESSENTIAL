@@ -41,6 +41,7 @@ class SSVideoClsDataset(Dataset):
         self.get_val_sample = False
         self.set_selection_frame = False
         self.frame_sample_rate = frame_sample_rate
+        self.uniform_ratio = args.uniform_ratio
         if self.mode in ['train']:
             self.aug = True
             if self.args.reprob > 0:
@@ -155,7 +156,7 @@ class SSVideoClsDataset(Dataset):
             scale_t = 1
 
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index) # T H W C
+            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index,uniform_ratio=self.uniform_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during training".format(sample))
@@ -185,7 +186,7 @@ class SSVideoClsDataset(Dataset):
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index)
+            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index,uniform_ratio=self.uniform_ratio)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -293,7 +294,7 @@ class SSVideoClsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1,uniform_ratio=0.5):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
         if not (os.path.exists(fname)):
@@ -328,7 +329,7 @@ class SSVideoClsDataset(Dataset):
         # handle temporal segments
         average_duration = len(vr) // self.num_segment
         all_index = []
-        uniform = False if random.random()>0.5 else True
+        uniform = False if random.random()>uniform_ratio else True
         if uniform:
             if average_duration > 0:
                 if not rehearsal:
@@ -346,9 +347,9 @@ class SSVideoClsDataset(Dataset):
             seg_len = len(vr)
             # for i in range(self.num_segment):
             if seg_len <= converted_len:
-                index = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
-                index = np.concatenate((index, np.ones(self.num_segment - seg_len // self.frame_sample_rate) * seg_len))
-                index = np.clip(index, 0, seg_len - 1).astype(np.int64)
+                index_ = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
+                index_ = np.concatenate((index_, np.ones(self.num_segment - seg_len // self.frame_sample_rate) * seg_len))
+                index_ = np.clip(index_, 0, seg_len - 1).astype(np.int64)
             else:
                 if not rehearsal:
                     end_idx = np.random.randint(converted_len, seg_len)
@@ -356,10 +357,10 @@ class SSVideoClsDataset(Dataset):
                     points = np.linspace(converted_len, seg_len, 4, endpoint=True)
                     end_idx = int(np.random.choice(points))
                 str_idx = end_idx - converted_len
-                index = np.linspace(str_idx, end_idx, num=self.num_segment)
-                index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
+                index_ = np.linspace(str_idx, end_idx, num=self.num_segment)
+                index_ = np.clip(index_, str_idx, end_idx - 1).astype(np.int64)
             # index = index + i*seg_len
-            all_index.extend(list(index))     
+            all_index.extend(list(index_))     
         
         
         if all_frames:

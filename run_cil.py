@@ -283,7 +283,7 @@ def get_args_cil():
     
     #! frame selection in last epoch
     parser.add_argument('--set_selection_frame', action='store_true', default=False)#! 코딩중인 Frame selection
-    
+    parser.add_argument('--uniform_ratio', default=0.5, type=float)
 
 
     known_args, _ = parser.parse_known_args()

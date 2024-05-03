@@ -118,8 +118,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             if args.distributed:
                 data_loader[task_id]['train'].sampler.set_epoch(epoch)   
             header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {epochs}]'
+            # break
             # if epoch<20:continue
-            if args.set_selection_frame and epoch==30:
+            if args.set_selection_frame and epoch==0:
                 torch.distributed.barrier()
                 if utils.is_main_process():
                     data_loader[task_id]['train'].dataset.on_selection_frame(True)
@@ -587,8 +588,8 @@ def save_frame_index_in_train(
         memory_video_path['dataset_samples'].append(video_name)
         memory_video_path['label_array'].append(label)
         memory_video_path['selected_frame'].append(selected_index.tolist())
-        # if c==10:
-        #     break
+        if c==10:
+            break
     with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'w') as file:
         json.dump(memory_video_path, file)
 @torch.no_grad()

@@ -186,7 +186,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
                     nn.init.constant_(m2.bias, 0)
     def attention(self, q: torch.Tensor,kv:torch.Tensor, need_weights=False):
         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
-        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1].topk(self.fs_topk,-1).indices.sort().values
+        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1]
     def forward(self, cls: torch.Tensor,x: torch.Tensor,get_frame=False):
         #입력 cls_token B,T,D
         B = x.shape[1]# X: T,B,D
@@ -202,7 +202,14 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
             if get_frame:
-                return self.attention(ln_cls,ln1,need_weights=True)
+                attention_map = self.attention(ln_cls,ln1,need_weights=True)
+                topk_index = attention_map.topk(self.fs_topk,-1).indices.sort().values
+                top_section = attention_map>(1/x.shape[0])
+                top_section = torch.nonzero(top_section[0,0], as_tuple=True)[0]
+                first_true_index = top_section[0].item()
+                last_true_index = top_section[-1].item()
+                frame_index = torch.linspace(first_true_index, last_true_index, x.shape[0]).long()
+                return frame_index
             cls = cls + self.drop_path(self.attention(ln_cls,ln1))
         elif self.temp_mode =='ba':
             ln_cls = self.ln_cls(self.time_down(cls))
@@ -225,7 +232,7 @@ class AIM_base_decoder(nn.Module):
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
-        self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
+        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
         self.use_aim_weight = args.use_aim_weight
         if args.use_aim_weight:
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
@@ -435,7 +442,7 @@ class AIM_base_decoder(nn.Module):
         # if T<8:
         #     x = torch.repeat_interleave(x, 8//T, dim=1)
         #     T=8
-        decoder_temporal_embedding=self.decoder_temporal_embedding 
+        decoder_temporal_embedding=self.temporal_embedding 
         if decoder_temporal_embedding.shape[1]!=(T+1):
             decoder_temporal_embedding = F.interpolate(
                 decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
@@ -465,8 +472,8 @@ class AIM_base_decoder(nn.Module):
                     frame_index = decoder(cls,x,get_frame)
             if self.fs_density:
                 density = calculate_density(frame_index,T)
-                if density>40.0:
-                    new_frame_index = expand_indices_around_center(frame_index,T, density/20.0)
+                if density>30.0:
+                    new_frame_index = expand_indices_around_center(frame_index,T, density/30.0)
                     # print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
                     frame_index = new_frame_index
                 # elif self.selected_selection:
@@ -480,7 +487,7 @@ class AIM_base_decoder(nn.Module):
                 # frame_index 텐서를 생성합니다.
                 frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             elif self.selected_selection:
-                frame_index = torch.tensor([frame_index[0,0,1], frame_index[0,0,6]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor([frame_index[0,0,2], frame_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 
             # indices = frame_index[0, 0]
             # gaps = indices[1:] - indices[:-1]
