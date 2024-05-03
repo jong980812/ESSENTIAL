@@ -208,7 +208,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
                 top_section = torch.nonzero(top_section[0,0], as_tuple=True)[0]
                 first_true_index = top_section[0].item()
                 last_true_index = top_section[-1].item()
-                frame_index = torch.linspace(first_true_index, last_true_index, x.shape[0]).long()
+                frame_index = torch.linspace(first_true_index, last_true_index,8).long()
                 return frame_index
             cls = cls + self.drop_path(self.attention(ln_cls,ln1))
         elif self.temp_mode =='ba':
