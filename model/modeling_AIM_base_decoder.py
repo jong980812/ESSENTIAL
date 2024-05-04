@@ -201,6 +201,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
         elif self.temp_mode=='attention':
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
+            cls = cls + self.drop_path(self.attention(ln_cls,ln1))
             if get_frame:
                 attention_map = self.attention(ln_cls,ln1,need_weights=True)
                 topk_index = attention_map.topk(self.fs_topk,-1).indices.sort().values
@@ -209,8 +210,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
                 first_true_index = top_section[0].item()
                 last_true_index = top_section[-1].item()
                 frame_index = torch.linspace(first_true_index, last_true_index,8).long()
-                return frame_index
-            cls = cls + self.drop_path(self.attention(ln_cls,ln1))
+                return frame_index,cls
         elif self.temp_mode =='ba':
             ln_cls = self.ln_cls(self.time_down(cls))
             ln1 = self.ln_1(self.kv_down(x))
@@ -232,7 +232,7 @@ class AIM_base_decoder(nn.Module):
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
-        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
+        self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
         self.use_aim_weight = args.use_aim_weight
         if args.use_aim_weight:
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
@@ -442,7 +442,7 @@ class AIM_base_decoder(nn.Module):
         # if T<8:
         #     x = torch.repeat_interleave(x, 8//T, dim=1)
         #     T=8
-        decoder_temporal_embedding=self.temporal_embedding 
+        decoder_temporal_embedding=self.decoder_temporal_embedding 
         if decoder_temporal_embedding.shape[1]!=(T+1):
             decoder_temporal_embedding = F.interpolate(
                 decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
@@ -469,7 +469,7 @@ class AIM_base_decoder(nn.Module):
                 if i < (self.ba_layers-1):
                     cls = decoder(cls,x)
                 else:
-                    frame_index = decoder(cls,x,get_frame)
+                    frame_index,cls = decoder(cls,x,get_frame)
             if self.fs_density:
                 density = calculate_density(frame_index,T)
                 if density>30.0:
@@ -488,12 +488,29 @@ class AIM_base_decoder(nn.Module):
                 frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             elif self.selected_selection:
                 frame_index = torch.tensor([frame_index[0,0,2], frame_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                
+            
+            
+            #!
+            cls_len = cls.shape[0]
+            cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+            # x_final = rearrange(x,'b d t -> b t d',b=B,t=T)
+            #
+            cls = cls.unsqueeze(-1).unsqueeze(-1)
+            
+            if self.avg_pool is not None:
+                cls = self.avg_pool(cls)
+            # [N, in_channels, 1, 1, 1]
+            if self.dropout is not None:
+                cls = self.dropout(cls)
+            # [N, in_channels, 1, 1, 1]
+            cls = cls.view(cls.shape[0], -1)
+            logit = self.head(cls)
+            #!
             # indices = frame_index[0, 0]
             # gaps = indices[1:] - indices[:-1]
             # average_gap = gaps.float().mean()
             # density = T / average_gap
-            return frame_index,T
+            return frame_index,T,logit
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 cls = decoder(cls,x)

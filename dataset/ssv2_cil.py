@@ -140,6 +140,12 @@ class SSVideoClsDataset(Dataset):
             self.label_array = copy.deepcopy(sample_info['label_array'])
             self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
             self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+    def update_from_sample_selection(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'selected_sample_frame_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
     def update_train_selected(self,task_id,args):
         with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'r') as file:
             sample_info = json.load(file)

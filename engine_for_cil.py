@@ -1,6 +1,8 @@
+import heapq
 import os
 import numpy as np
 import math
+import random
 import sys
 from typing import Iterable, Optional
 import torch
@@ -135,6 +137,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 if utils.is_main_process():
                     data_loader[task_id]['train'].dataset.on_selection_frame(True)
                     save_frame_index_in_train(model=model,data_loader=data_loader[task_id]['train'],device = device, task_id=task_id, class_mask = None, args = args)
+                    save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask)    
                 torch.distributed.barrier()
                 data_loader[task_id]['train'].dataset.update_train_selected(task_id,args)
                 data_loader[task_id]['train'].dataset.on_selection_frame(False)
@@ -169,6 +172,10 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 save_frame_index(model=model,data_loader=data_loader,device = device, task_id=task_id, class_mask = None, args = args)
             torch.distributed.barrier()
             data_loader[task_id]['rehearsal'].dataset.update_rehearsal(task_id,args)
+            torch.distributed.barrier()
+        elif args.sample_selection:
+            torch.distributed.barrier()
+            data_loader[task_id]['rehearsal'].dataset.update_from_sample_selection(task_id,args)
             torch.distributed.barrier()
         #!
         #!************************ Rehearsal *************************************
@@ -565,7 +572,7 @@ def save_frame_index_in_train(
                     args=None,):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Training Saving Frame Index: [Task {} train Loader]'.format(task_id + 1)
-    memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[]}
+    memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[],'energy':[]}
     model.eval()
     new_dataset = data_loader.dataset
     # new_dataset.all_frames = True
@@ -593,15 +600,97 @@ def save_frame_index_in_train(
         video_name = vname[0]+'.mp4'
         label = int(target.cpu())
         with torch.cuda.amp.autocast():
-            frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
+            frame_index,num_frames,logit= model(videos,train=False,task_id=task_id,get_frame = True)
         selected_index = frame_index.squeeze(0).squeeze(0).cpu().numpy()
         memory_video_path['dataset_samples'].append(video_name)
         memory_video_path['label_array'].append(label)
         memory_video_path['selected_frame'].append(selected_index.tolist())
+        memory_video_path['energy'].append(round(logit[0,label].item(),4))
         # if c==10:
         #     break
     with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'w') as file:
         json.dump(memory_video_path, file)
+@torch.no_grad()
+def save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask):
+    print("**************Sample Selection*******************")
+    
+    class_num = sum([len(mask) for mask in class_mask[:task_id+1]])
+    from collections import defaultdict
+    label_groups = defaultdict(list)
+    if task_id == 0:
+        with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'r') as file:
+            selected_frame = json.load(file)
+        for idx, label in enumerate(selected_frame['label_array']):
+            # 각 label에 해당하는 정보들을 하나의 딕셔너리로 묶어서 저장
+            entry = {
+                'sample': selected_frame['dataset_samples'][idx],
+                'selected_frame': selected_frame['selected_frame'][idx],
+                'energy': selected_frame['energy'][idx]
+            }
+            label_groups[label].append(entry)
+        # 각 그룹별로 energy 기준 상위 N개를 추출합니다.
+    else:
+        for task in range(task_id+1):
+            if task<task_id:
+                with open(os.path.join(args.output_dir,f'selected_sample_frame_task_{task+1}.txt'), 'r') as file:
+                    selected_frame = json.load(file)
+            else:
+                with open(os.path.join(args.output_dir,f'selected_frame_task_{task+1}.txt'), 'r') as file:
+                    selected_frame = json.load(file)
+            for idx, label in enumerate(selected_frame['label_array']):
+                # 각 label에 해당하는 정보들을 하나의 딕셔너리로 묶어서 저장
+                entry = {
+                    'sample': selected_frame['dataset_samples'][idx],
+                    'selected_frame': selected_frame['selected_frame'][idx],
+                    'energy': selected_frame['energy'][idx]
+                }
+                label_groups[label].append(entry)
+    
+    new_memory = {}
+    save_num = math.ceil(args.memory_size/class_num)
+    print(f'Class num: {class_num}')
+    print(f'Memory per class: {save_num}')
+    for label, entries in label_groups.items():
+        # 각 label에서 energy가 가장 높은 상위 N개를 선택
+        top_entries = heapq.nlargest(save_num, entries, key=lambda x: x['energy'])
+        if len(top_entries)<save_num:
+            print("error")
+        new_memory[label] = top_entries
+    total_items = sum(len(items) for items in new_memory.values())
+    if total_items>args.memory_size: print(f"{total_items} is over {args.memory_size}: Calibrating") 
+    while total_items > args.memory_size:
+        labels_with_full_save_num = [label for label in new_memory if len(new_memory[label]) == save_num]
+        if not labels_with_full_save_num:
+            total_items = sum(len(items) for items in new_memory.values())
+            print(f"After_calibraing: {total_items}")
+            break
+        random_label = random.choice(labels_with_full_save_num)  # 무작위로 하나의 레이블 선택
+        new_memory[random_label].pop()  # 선택된 레이블에서 마지막 항목 제거
+        total_items -= 1
+    print("\n\nSample num per Class:")
+    for label, items in new_memory.items():
+        print(f"Label {label}: {len(items)} samples")
+    print(f'Total: {total_items}')
+    dataset_samples = []
+    label_array = []
+    selected_frame = []
+    energy = []
+    # 각 레이블의 항목을 순회하며 리스트를 구성
+    for label, items in new_memory.items():
+        for item in items:
+            dataset_samples.append(item['sample'])
+            label_array.append(int(label))  # 'label1'에서 숫자만 추출
+            selected_frame.append(item['selected_frame'])
+            energy.append(item['energy'])
+    # 모든 데이터를 하나의 딕셔너리로 결합
+    structured_data = {
+        'dataset_samples': dataset_samples,
+        'label_array': label_array,
+        'selected_frame': selected_frame,
+        'energy': energy
+    }
+    with open(os.path.join(args.output_dir,f'selected_sample_frame_task_{task_id+1}.txt'), 'w') as file:
+        json.dump(structured_data, file)
 @torch.no_grad()
 def save_frame_index(model: torch.nn.Module, 
                     data_loader, 
