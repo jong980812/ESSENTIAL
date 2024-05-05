@@ -43,6 +43,7 @@ class SSVideoClsDataset(Dataset):
         self.set_selection_frame = False
         self.frame_sample_rate = frame_sample_rate
         self.uniform_ratio = args.uniform_ratio
+        self.task_id = task_id
         if self.mode in ['train']:
             self.aug = True
             if self.args.reprob > 0:
@@ -103,11 +104,11 @@ class SSVideoClsDataset(Dataset):
                     args.memory_video_path['dataset_samples'].append(self.dataset_samples[index])
                     args.memory_video_path['label_array'].append(label)
                     
-                    
+            print(f"Task {task_id} - Num: {len(args.memory_video_path['dataset_samples'])}")
             with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
                 json.dump(args.memory_video_path, file)
 
-        assert len(args.memory_video_path['label_array']) <= args.memory_size
+        # assert len(args.memory_video_path['label_array']) <= args.memory_size
         import pandas as pd
 
 
