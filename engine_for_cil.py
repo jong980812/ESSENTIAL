@@ -752,7 +752,7 @@ def save_frame_index(model: torch.nn.Module,
             memory_video_path['dataset_samples'].append(video_name)
             memory_video_path['label_array'].append(label)
             memory_video_path['selected_frame'].append(selected_index.tolist())
-            # print(f'Index: {frame_index},   {num_frames} {vname}')
+            print(f'Index: {frame_index}, {num_frames} {vname}')
     with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
             json.dump(memory_video_path, file)
     re_dataset.all_frames = False
