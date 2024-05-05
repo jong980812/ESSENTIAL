@@ -747,7 +747,7 @@ def save_frame_index(model: torch.nn.Module,
                     memory_video_path['selected_frame'].append(pre_selected_frame[sample_index])
                     continue
             with torch.cuda.amp.autocast():
-                frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
+                frame_index,num_frames,logit= model(videos,train=False,task_id=task_id,get_frame = True)
             selected_index = frame_index.squeeze(0).squeeze(0).cpu().numpy()
             memory_video_path['dataset_samples'].append(video_name)
             memory_video_path['label_array'].append(label)
