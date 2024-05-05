@@ -278,7 +278,7 @@ def get_args_cil():
     parser.add_argument('--handcrafted_selection', action='store_true', default=False)#! 코딩중인 Frame selection
     parser.add_argument('--selected_selection', action='store_true', default=False)#! 코딩중인 Frame selection
     parser.add_argument('--fs_density', action='store_true', default=False)#! 코딩중인 Frame selection
-    parser.add_argument('--use_aim_weight', action='store_true', default=False)#! 코딩중인 Frame selection
+    parser.add_argument('--use_aim_weight',type=str, default=None)#! 코딩중인 Frame selection
     
     
     #! frame selection in last epoch
@@ -435,8 +435,8 @@ def main(args, ds_init):
             args=args
         )
         num_layers = model.layers
-        if args.use_aim_weight:
-            weight = torch.load('/data/yuri1255/project/videoCIL/result/rehearsal_fix/ssv2/AIM_3480/OUT/checkpoint/task1_checkpoint.pth',map_location='cpu')['model']
+        if args.use_aim_weight is not None:
+            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
             del weight['head.weight']
             del weight['head.bias']
             print(model.load_state_dict(weight,False))
