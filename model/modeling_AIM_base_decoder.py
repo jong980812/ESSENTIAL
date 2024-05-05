@@ -482,10 +482,14 @@ class AIM_base_decoder(nn.Module):
                     average_duration = T // 8
                     frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             if self.handcrafted_selection:
-                str_idx = int(T * 1/3)
-                end_idx = int(T * 2/3)
+                # str_idx = int(T * 1/3)
+                # end_idx = int(T * 2/3)
+                average_duration = T // 8
+                uniform_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor([uniform_index[0,0,2], uniform_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                
                 # frame_index 텐서를 생성합니다.
-                frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                # frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             elif self.selected_selection:
                 frame_index = torch.tensor([frame_index[0,0,2], frame_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             
