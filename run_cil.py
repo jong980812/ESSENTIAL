@@ -36,6 +36,7 @@ from model.modeling_CLIP_temporal import CLIP_temporal
 from model.modeling_AIM_custom import AIM_custom
 from model.modeling_AIM_base import AIM_base
 from model.modeling_AIM_base_decoder import AIM_base_decoder
+from model.modeling_AIM_base_frame_order import AIM_base_frame_order
 import model.modelling_vmae
 import genetic
 import random
@@ -275,15 +276,15 @@ def get_args_cil():
     parser.add_argument('--fs_topk', default=8, type=int)
     parser.add_argument('--n_token_rehearsal', default=8, type=int)
     parser.add_argument('--debugging', action='store_true', default=False)#! No train 
-    parser.add_argument('--handcrafted_selection', action='store_true', default=False)#! 코딩중인 Frame selection
-    parser.add_argument('--selected_selection', action='store_true', default=False)#! 코딩중인 Frame selection
-    parser.add_argument('--fs_density', action='store_true', default=False)#! 코딩중인 Frame selection
-    parser.add_argument('--use_aim_weight',type=str, default=None)#! 코딩중인 Frame selection
+    parser.add_argument('--handcrafted_selection', action='store_true', default=False)
+    parser.add_argument('--selected_selection', action='store_true', default=False)
+    parser.add_argument('--fs_density', action='store_true', default=False)
+    parser.add_argument('--use_aim_weight',type=str, default=None)
     
     
     #! frame selection in last epoch
-    parser.add_argument('--set_selection_frame', action='store_true', default=False)#! 코딩중인 Frame selection
-    parser.add_argument('--sample_selection', action='store_true', default=False)#! 코딩중인 Frame selection
+    parser.add_argument('--set_selection_frame', action='store_true', default=False)
+    parser.add_argument('--sample_selection', action='store_true', default=False)
     parser.add_argument('--uniform_ratio', default=0.5, type=float)
     parser.add_argument('--rehearsal_samples_per_class', default=20, type=int)
 
@@ -371,8 +372,8 @@ def main(args, ds_init):
             print('unfreeze list :', unfreeze_list)
         # check = torch.load('/data/jong980812/project/cil/videoCIL/result/lp/ssv2/AIM/109_dim1_50epoch_24/OUT/checkpoint/task10_epoch_50_checkpoint.pth','cpu')['model']
         # print(model.load_state_dict(check))
-    elif args.model == 'AIM_custom':
-        model = AIM_custom(
+    elif args.model == 'AIM_base_frame_order':
+        model = AIM_base_frame_order(
             input_resolution=224,
             patch_size=16,
             num_frames=args.num_frames,
@@ -388,6 +389,11 @@ def main(args, ds_init):
             class_mask=class_mask,
             args=args
         )
+        if args.use_aim_weight is not None:
+            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
+            del weight['head.weight']
+            del weight['head.bias']
+            print(model.load_state_dict(weight,False))
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
         if args.unfreeze_layers is not None:

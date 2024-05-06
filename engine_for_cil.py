@@ -345,7 +345,7 @@ def train_one_epoch(model: torch.nn.Module,
                 model, samples, targets, criterion,mask,task_id,args,device)
 
         loss_value = loss.item()
-
+        loss = loss+order_loss
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
@@ -409,7 +409,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
-    outputs,x_final = model(samples,train=True,task_id=task_id)
+    outputs,_ = model(samples,train=True,task_id=task_id)
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
     if (mask is not None) and (not args.each_head) and (not args.cos): #! each head이면 안됌.
@@ -431,13 +431,16 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
                 / args.nb_classes, dim=1))
         loss = loss + debias_loss
     if args.order:
+        shuffled_indices = np.random.permutation(samples.shape[2])
+        shuffled_inputs = samples[:, :,shuffled_indices]
+        _,x_final = model(shuffled_inputs,train=True,task_id=task_id)
         B, T = x_final.shape[:2]
-        t_label = torch.LongTensor(list(range(T))).unsqueeze(0).repeat(B,1).to(args.device)
+        t_label = torch.LongTensor(shuffled_indices).unsqueeze(0).repeat(B,1).to(args.device)
         order_loss = criterion(x_final.view(B*T, -1), t_label.view(-1))
         # TODO mixup
         # outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-1e4'))
         # target = target.index_fill(dim=1, index=not_mask, value=int(0))
-        loss = loss + order_loss
+        # loss = loss + order_loss
   
         
     return loss,(None),(order_loss if args.order else None),(debias_loss if args.debias else None), outputs
@@ -752,7 +755,7 @@ def save_frame_index(model: torch.nn.Module,
             memory_video_path['dataset_samples'].append(video_name)
             memory_video_path['label_array'].append(label)
             memory_video_path['selected_frame'].append(selected_index.tolist())
-            print(f'Index: {frame_index}, {num_frames} {vname}')
+            # print(f'Index: {frame_index}, {num_frames} {vname}')
     with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
             json.dump(memory_video_path, file)
     re_dataset.all_frames = False

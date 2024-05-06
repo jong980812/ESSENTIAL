@@ -218,7 +218,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             cls = self.time_up(x_cls)+cls
         return cls
 
-class AIM_base_decoder(nn.Module):
+class AIM_base_frame_order(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
         super().__init__()
@@ -239,6 +239,7 @@ class AIM_base_decoder(nn.Module):
             
         self.order = args.order
         if self.order:
+            self.frame_token = nn.Parameter(scale * torch.randn(num_frames,width))
             self.temp_head = nn.Linear(width, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
@@ -459,11 +460,13 @@ class AIM_base_decoder(nn.Module):
         cls는 decoder를 위한 새로운 CLS token. 
         '''
         cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
+        frame_token = self.frame_token.expand(B,-1,-1)
         cls_and_x = torch.cat([cls,x],1)# B, T+1, D
         cls_and_x = cls_and_x + decoder_temporal_embedding
         cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
         cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
         cls = cls.unsqueeze(0)
+        cls = torch.cat([cls,frame_token.permute(1,0,2)],0)
         if get_frame:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 if i < (self.ba_layers-1):
@@ -502,8 +505,10 @@ class AIM_base_decoder(nn.Module):
             #!
             cls_len = cls.shape[0]
             cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            x_final = rearrange(cls,'b d t -> b t d',b=B,t=T)
-            #
+            cls,frame_token = cls[:,:,:1],cls[:,:,1:]
+            x_final = rearrange(frame_token,'b d t -> b t d',b=B,t=self.num_frames)
+
+
             cls = cls.unsqueeze(-1).unsqueeze(-1)
             
             if self.avg_pool is not None:
@@ -526,7 +531,8 @@ class AIM_base_decoder(nn.Module):
             
         cls_len = cls.shape[0]
         cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-        # x_final = rearrange(cls,'b d t -> b t d',b=B,t=)
+        cls,frame_token = cls[:,:,:1],cls[:,:,1:]
+        x_final = rearrange(frame_token,'b d t -> b t d',b=B,t=self.num_frames)
         #
         cls = cls.unsqueeze(-1).unsqueeze(-1)
         
@@ -537,7 +543,8 @@ class AIM_base_decoder(nn.Module):
             cls = self.dropout(cls)
         # [N, in_channels, 1, 1, 1]
         cls = cls.view(cls.shape[0], -1)
-        
+        if self.order:
+            x_final = self.temp_head(x_final)
         if self.cos:
             cls = F.linear(F.normalize(cls, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
             cls = self.cos_temp * cls  # temperature set as 16
@@ -545,7 +552,7 @@ class AIM_base_decoder(nn.Module):
         # [N, in_channels]
             cls = self.head(cls)
         # x_final = (self.temp_head(x_final)) if self.order else None
-        return cls,None
+        return cls,x_final
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
