@@ -14,3 +14,4 @@ logs/
 scripts/
 multinode_sh/
 **/result*/
+NIPS/
