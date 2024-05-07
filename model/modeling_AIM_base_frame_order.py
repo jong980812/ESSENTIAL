@@ -232,7 +232,7 @@ class AIM_base_frame_order(nn.Module):
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
-        self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
+        self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.use_aim_weight = args.use_aim_weight
         if args.use_aim_weight:
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
@@ -251,7 +251,10 @@ class AIM_base_frame_order(nn.Module):
         self.handcrafted_selection = args.handcrafted_selection
         self.selected_selection = args.selected_selection
         self.fs_density = args.fs_density
-        self.cls_aug = args.cls_aug
+        self.replay_token = args.replay_token
+        if self.replay_token:
+            self.cls_prompt = nn.ModuleList([nn.Parameter(torch.FloatTensor(num_frames, self.embed_dim), requires_grad=True) for _ in range(args.num_tasks)])
+        nn.init.uniform_(self.cls_prompt)
         if self.cls_aug:self.aug_adapter = Adapter(width,192) 
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
@@ -398,7 +401,7 @@ class AIM_base_frame_order(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False):
+    def forward(self, x: torch.Tensor, train=False,task_id =-1, replay_token=False,get_frame=False):
             
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
@@ -444,9 +447,9 @@ class AIM_base_frame_order(nn.Module):
         #     x = torch.repeat_interleave(x, 8//T, dim=1)
         #     T=8
         decoder_temporal_embedding=self.decoder_temporal_embedding 
-        if decoder_temporal_embedding.shape[1]!=(T+1):
+        if decoder_temporal_embedding.shape[1]!=(T):
             decoder_temporal_embedding = F.interpolate(
-                decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
+                decoder_temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
             ).squeeze(1)
         # #!
         # if get_frame:
@@ -460,13 +463,21 @@ class AIM_base_frame_order(nn.Module):
         cls는 decoder를 위한 새로운 CLS token. 
         '''
         cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
-        frame_token = self.frame_token.expand(B,-1,-1)
-        cls_and_x = torch.cat([cls,x],1)# B, T+1, D
-        cls_and_x = cls_and_x + decoder_temporal_embedding
-        cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
-        cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
+        x = x + decoder_temporal_embedding
+        if self.replay_token:
+            cls_prompt = self.cls_prompt[task_id].expand(B,-1,-1)
+            cls_prompt = cls_prompt+decoder_temporal_embedding
+            # frame_token = self.frame_token.expand(B,-1,-1)
+            # cls_and_x = torch.cat([cls,x],1)# B, T+1, D
+            # cls_and_x = cls_and_x + decoder_temporal_embedding
+            # cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
+            input_tokens = torch.cat([x,cls_prompt],dim =1)
+            # cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
+            input_tokens = rearrange(x, 'b t d -> t b d',b=B,t=2*T)
+        cls = rearrange(cls, 'b t d -> t b d',b=B,t=1)
+        
         cls = cls.unsqueeze(0)
-        cls = torch.cat([cls,frame_token.permute(1,0,2)],0)
+        cls = torch.cat([cls,frame_token.permute(1,0,2)],0)#! 1+frame,b,d
         if get_frame:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 if i < (self.ba_layers-1):

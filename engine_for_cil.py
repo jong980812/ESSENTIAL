@@ -345,7 +345,8 @@ def train_one_epoch(model: torch.nn.Module,
                 model, samples, targets, criterion,mask,task_id,args,device)
 
         loss_value = loss.item()
-        loss = loss+order_loss
+        if order_loss is not None:
+            loss+=order_loss
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)

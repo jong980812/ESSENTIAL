@@ -487,7 +487,7 @@ class AIM_base_decoder(nn.Module):
                 # frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 average_duration = T // 8
                 uniform_index = np.multiply(list(range(8)), average_duration)
-                frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,2,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
 
                 # frame_index = torch.tensor([uniform_index[0,0,2], uniform_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 
@@ -500,32 +500,33 @@ class AIM_base_decoder(nn.Module):
                 # frame_index = torch.tensor([frame_index[0,0,2], frame_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             
             #!
-            cls_len = cls.shape[0]
-            cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            x_final = rearrange(cls,'b d t -> b t d',b=B,t=T)
-            #
-            cls = cls.unsqueeze(-1).unsqueeze(-1)
+            # cls_len = cls.shape[0]
+            # cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+            # #
+            # cls = cls.unsqueeze(-1).unsqueeze(-1)
             
-            if self.avg_pool is not None:
-                cls = self.avg_pool(cls)
-            # [N, in_channels, 1, 1, 1]
-            if self.dropout is not None:
-                cls = self.dropout(cls)
-            # [N, in_channels, 1, 1, 1]
-            cls = cls.view(cls.shape[0], -1)
-            logit = self.head(cls)
+            # if self.avg_pool is not None:
+            #     cls = self.avg_pool(cls)
+            # # [N, in_channels, 1, 1, 1]
+            # if self.dropout is not None:
+            #     cls = self.dropout(cls)
+            # # [N, in_channels, 1, 1, 1]
+            # cls = cls.view(cls.shape[0], -1)
+            # logit = self.head(cls)
             #!
             # indices = frame_index[0, 0]
             # gaps = indices[1:] - indices[:-1]
             # average_gap = gaps.float().mean()
             # density = T / average_gap
-            return frame_index,T,logit
+            return frame_index,T,_
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 cls = decoder(cls,x)
             
         cls_len = cls.shape[0]
         cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        x_final = rearrange(x,'t b d -> b t d',b=B,t=T)
+        
         # x_final = rearrange(cls,'b d t -> b t d',b=B,t=)
         #
         cls = cls.unsqueeze(-1).unsqueeze(-1)
@@ -544,8 +545,8 @@ class AIM_base_decoder(nn.Module):
         else:
         # [N, in_channels]
             cls = self.head(cls)
-        # x_final = (self.temp_head(x_final)) if self.order else None
-        return cls,None
+        x_final = (self.temp_head(x_final)) if self.order else None
+        return cls,x_final
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
