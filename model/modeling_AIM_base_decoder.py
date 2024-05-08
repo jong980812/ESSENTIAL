@@ -234,7 +234,7 @@ class AIM_base_decoder(nn.Module):
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
-        self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames+1, width))
+        self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.use_aim_weight = args.use_aim_weight
         if args.use_aim_weight:
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
@@ -265,7 +265,7 @@ class AIM_base_decoder(nn.Module):
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
-        self.mse = torch.nn.MSELoss()
+        # self.mse = torch.nn.MSELoss()
         
         #!!
         self.each_head = args.each_head
@@ -445,9 +445,9 @@ class AIM_base_decoder(nn.Module):
         #     x = torch.repeat_interleave(x, 8//T, dim=1)
         #     T=8
         decoder_temporal_embedding=self.decoder_temporal_embedding 
-        if decoder_temporal_embedding.shape[1]!=(T+1):
+        if decoder_temporal_embedding.shape[1]!=(T):
             decoder_temporal_embedding = F.interpolate(
-                decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
+                decoder_temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
             ).squeeze(1)
         # #!
         # if get_frame:
@@ -461,11 +461,14 @@ class AIM_base_decoder(nn.Module):
         cls는 decoder를 위한 새로운 CLS token. 
         '''
         cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
-        cls_and_x = torch.cat([cls,x],1)# B, T+1, D
-        cls_and_x = cls_and_x + decoder_temporal_embedding
-        cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
-        cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
-        cls = cls.unsqueeze(0)
+        # cls_and_x = torch.cat([cls,x],1)# B, T+1, D
+        # cls_and_x = cls_and_x + decoder_temporal_embedding
+        # cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
+        # cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
+        # cls = cls.unsqueeze(0)
+        x = x + decoder_temporal_embedding
+        x = rearrange(x, 'b t d -> t b d',b=B,t=T);cls = rearrange(cls, 'b t d -> t b d',b=B,t=1)
+
         if get_frame:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 if i < (self.ba_layers-1):
