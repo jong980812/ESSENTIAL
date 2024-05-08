@@ -342,11 +342,15 @@ def train_one_epoch(model: torch.nn.Module,
         else:
             with torch.cuda.amp.autocast():
                 loss,token_loss,virtual_loss,output = train_class_batch(
-                model, samples, targets, criterion,mask,task_id,args,device)
-        token_value = token_loss.item()
-        virtual_value = virtual_loss.item()
+                model, samples, targets, criterion,mask,task_id,args,device,rehearsal)
+        if token_loss is not None:
+            token_value = token_loss.item()
+            loss +=token_loss
+        if virtual_loss is not None:
+            virtual_value = virtual_loss.item()
+            loss +=virtual_loss
         loss_value = loss.item()
-        loss = loss+token_loss+virtual_loss
+
         # if order_loss is not None:
         #     loss+=order_loss
         if not math.isfinite(loss_value):
@@ -380,8 +384,8 @@ def train_one_epoch(model: torch.nn.Module,
             
             
         metric_logger.update(loss=loss_value)
-        metric_logger.update(loss_virtual=virtual_value)
-        metric_logger.update(loss_token=token_value)
+        metric_logger.update(loss_virtual=virtual_value) if virtual_loss is not None else None
+        metric_logger.update(loss_token=token_value) if token_loss is not None else None 
         # metric_logger.update(order=order_loss.item()) if order_loss is not None else None 
         # metric_logger.update(cls_aug_loss=cls_aug_loss.item()) if cls_aug_loss is not None else None 
         # metric_logger.update(debias=debias_loss.item()) if debias_loss is not None else None
@@ -409,12 +413,12 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def train_class_batch(model, samples, target, criterion,mask,task_id,args,device):
+def train_class_batch(model, samples, target, criterion,mask,task_id,args,device,rehearsal):
     
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
-    outputs,token_loss = model(samples,train=True,task_id=task_id)
+    outputs,token_loss = model(samples,train=True,task_id=task_id,rehearsal = rehearsal) 
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
 
@@ -424,7 +428,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
         if len(outputs)==2:
             origin,virtual = outputs[0],outputs[1]
             origin = origin.index_fill(dim=1, index=not_mask, value=float('-inf'))
-            virtual = virtual.index_fill(dim=1, index=not_mask, value=float('-inf'))
+            if virtual is not None:virtual = virtual.index_fill(dim=1, index=not_mask, value=float('-inf'))
         else:
             outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
     target = target#-first_class
@@ -433,7 +437,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     else:
         if len(outputs)==2:
             loss = criterion(origin, target)
-            loss_virtual=criterion(virtual, target)
+            loss_virtual=criterion(virtual, target) if virtual is not None else None
         else:
             loss = criterion(outputs, target)
     
@@ -458,7 +462,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
         # loss = loss + order_loss
   
         
-    return loss,(token_loss),(loss_virtual), outputs[0]
+    return loss,(token_loss),(loss_virtual), origin
 
 
 def get_loss_scale_for_deepspeed(model):
@@ -511,7 +515,8 @@ def evaluate(model: torch.nn.Module,  data_loader,
                 # selection = selector(videos)
                 # selection_results = selection.argmax(1)#(B)
                 # if args.order:
-                logits,_ = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
+                logits,_ = model(videos,train=False,task_id=task_id)
+                logits = logits[0]
                 # else:
                 # logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
                        

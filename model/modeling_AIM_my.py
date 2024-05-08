@@ -163,21 +163,16 @@ class Frame_token_decoder(nn.Module):
         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
         return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1]
     def forward(self, x,replay_tokens):
-        B,T,D= x.shape[0],x.shape[1],x.shape[2]
+        B,T,D= replay_tokens.shape[0],replay_tokens.shape[1],replay_tokens.shape[2]
         # new_tokens = replay_tokens[:,:,:]
         # x = rearrange(x, 't b d -> b t d',b=B,t=T);new_tokens = rearrange(new_tokens, 't b d -> b t d',b=B,t=T)
-        random_indices = torch.stack([torch.sort(torch.randperm(8)[:self.fs_topk]).values for _ in range(B)])
-        new_x = torch.zeros(B,self.fs_topk,D).to(x.device)
+        # random_indices = torch.stack([torch.sort(torch.randperm(8)[:self.fs_topk]).values for _ in range(B)])
         # new_tokens = torch.zeros_like(replay_tokens)
-        for i in range(B):
-            new_x[i] = x[i,random_indices[i]]
-            # indice = random_indices[i]
-            # x_ = nn.Parameter(x[i, random_indices[i]],required_grad = False)
-            # new_tokens[i, random_indices[i]] = x
         replay_tokens = replay_tokens + self.temporal_encoding
-        new_x = rearrange(new_x, 'b t d -> t b d',b=B,t=self.fs_topk);replay_tokens = rearrange(replay_tokens, 'b t d -> t b d',b=B,t=T)
+        x = rearrange(x, 'b t d -> t b d',b=B,t=self.fs_topk)
+        replay_tokens = rearrange(replay_tokens, 'b t d -> t b d',b=B,t=T)
         new_tokens = self.ln_tokens(replay_tokens)#!T,b,d
-        replay_tokens = replay_tokens + self.drop_path(self.attention(new_tokens,self.ln_1(new_x)))
+        replay_tokens = replay_tokens + self.drop_path(self.attention(new_tokens,self.ln_1(x)))
         replay_tokens = replay_tokens + self.drop_path(self.mlp(self.ln_2(replay_tokens)))
         return replay_tokens
 class Decoder_ResidualAttentionBlock_time(nn.Module):
@@ -285,7 +280,7 @@ class AIM_my(nn.Module):
         self.fs_density = args.fs_density
         self.cls_aug = args.cls_aug
         if self.replay_token:
-            self.cls_prompt = nn.Parameter(torch.FloatTensor(args.num_tasks,num_frames, self.embed_dim), requires_grad=True)
+            self.cls_prompt = nn.Parameter(torch.FloatTensor(10,num_frames, self.embed_dim), requires_grad=True)
             nn.init.uniform_(self.cls_prompt)
             self.decoder_frame_token = Frame_token_decoder(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk)
         if self.cls_aug:self.aug_adapter = Adapter(width,192) 
@@ -438,7 +433,7 @@ class AIM_my(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False):
+    def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False,rehearsal = False):
             
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
@@ -479,48 +474,58 @@ class AIM_my(nn.Module):
 
         cls_origin = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         cls_virtual = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
-        frame_token = self.cls_prompt[task_id].expand(B,-1,-1)# b,t,d
-        frame_token = self.decoder_frame_token(x,frame_token)
+        frame_token = self.cls_prompt[0].expand(B,-1,-1)# b,t,d
+        if T!=self.fs_topk:
+            new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
+            for i in range(B):
+                new_x[i] = x[i,[2,5]]
+                # indice = random_indices[i]
+                # x_ = nn.Parameter(x[i, random_indices[i]],required_grad = False)
+                # new_tokens[i, random_indices[i]] = x
+        else:
+            new_x = x
+        frame_token = self.decoder_frame_token(new_x,frame_token)
         x = x + decoder_temporal_embedding
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         cls_origin = rearrange(cls_origin, 'b t d -> t b d',b=B,t=1)
-        cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
-
-        if get_frame:
+        if rehearsal:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                if i < (self.ba_layers-1):
-                    cls = decoder(cls,x)
-                else:
-                    attention_map,cls = decoder(cls,x,get_frame)
-            if self.fs_density:
-                density = calculate_density(frame_index,T)
-                if density>30.0:
-                    new_frame_index = expand_indices_around_center(frame_index,T, density/30.0)
-                    # print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
-                    frame_index = new_frame_index
-                # elif self.selected_selection:
-                    # pass
-                else:
-                    average_duration = T // 8
-                    frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-            average_duration = T // 8
-            uniform_index = np.multiply(list(range(8)), average_duration)
+                cls_origin = decoder(cls_origin,frame_token)
+            cls_len = cls_origin.shape[0]
+            cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+            cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
+            if self.avg_pool is not None:
+                cls_origin = self.avg_pool(cls_origin)
+            if self.dropout is not None:
+                cls_origin = self.dropout(cls_origin)
+            cls_origin = cls_origin.view(cls_origin.shape[0], -1)
+            cls_origin = self.head(cls_origin)
+            return (cls_origin,None),None
+        cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
+        if get_frame:
+            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            #     if i < (self.ba_layers-1):
+            #         cls = decoder(cls,x)
+            #     else:
+            #         attention_map,cls = decoder(cls,x,get_frame)
+            # average_duration = T // 8
+            # uniform_index = np.multiply(list(range(8)), average_duration)
             if self.handcrafted_selection:
-                str_idx = int(T * 1/3)
-                end_idx = int(T * 2/3)
-                frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # average_duration = T // 8
-                # uniform_index = np.multiply(list(range(8)), average_duration)
+                # str_idx = int(T * 1/3)
+                # end_idx = int(T * 2/3)
+                # frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                average_duration = T // 8
+                uniform_index = np.multiply(list(range(8)), average_duration)
                 # frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
 
-                # frame_index = torch.tensor([uniform_index[0,0,2], uniform_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor([uniform_index[2], uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 
                 # frame_index 텐서를 생성합니다.
-            elif self.selected_selection:
-                uniform_attention_map = attention_map[:,:,uniform_index]
-                topk_indices = uniform_attention_map.topk(self.fs_topk,-1).indices.squeeze(0).squeeze(0)
-                uniform_index=np.sort((uniform_index[topk_indices.cpu()]))
-                frame_index = torch.tensor(uniform_index,dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            # elif self.selected_selection:
+            #     uniform_attention_map = attention_map[:,:,uniform_index]
+            #     topk_indices = uniform_attention_map.topk(self.fs_topk,-1).indices.squeeze(0).squeeze(0)
+            #     uniform_index=np.sort((uniform_index[topk_indices.cpu()]))
+            #     frame_index = torch.tensor(uniform_index,dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             return frame_index,T,None
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
