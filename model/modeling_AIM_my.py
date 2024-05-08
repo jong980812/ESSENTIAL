@@ -141,6 +141,45 @@ class Transformer(nn.Module):
                             # nn.init.constant_(m2.bias, 0)
                             m2.weight.requires_grad_(True)
                             m2.bias.requires_grad_(True)
+class Frame_token_decoder(nn.Module):
+    def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.2,dim_mlp=192,fs_topk=8):
+        super().__init__()
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.fs_topk = fs_topk
+        d_model = 768
+        n_head = 12
+        self.temporal_encoding = nn.Parameter(torch.zeros(1, num_frames, d_model))
+        self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.attn_mask = attn_mask
+        self.ln_1 = LayerNorm(d_model)
+        self.ln_2 = LayerNorm(d_model)
+        self.ln_tokens = LayerNorm(d_model)
+        self.mlp = nn.Sequential(OrderedDict([
+            ("c_fc", nn.Linear(d_model, d_model * 4)),
+            ("gelu", QuickGELU()),
+            ("c_proj", nn.Linear(d_model * 4, d_model))
+            ]))
+    def attention(self, q: torch.Tensor,kv:torch.Tensor, need_weights=False):
+        self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
+        return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1]
+    def forward(self, x,replay_tokens):
+        B,T,D= x.shape[0],x.shape[1],x.shape[2]
+        # new_tokens = replay_tokens[:,:,:]
+        # x = rearrange(x, 't b d -> b t d',b=B,t=T);new_tokens = rearrange(new_tokens, 't b d -> b t d',b=B,t=T)
+        random_indices = torch.stack([torch.sort(torch.randperm(8)[:self.fs_topk]).values for _ in range(B)])
+        new_x = torch.zeros(B,self.fs_topk,D).to(x.device)
+        # new_tokens = torch.zeros_like(replay_tokens)
+        for i in range(B):
+            new_x[i] = x[i,random_indices[i]]
+            # indice = random_indices[i]
+            # x_ = nn.Parameter(x[i, random_indices[i]],required_grad = False)
+            # new_tokens[i, random_indices[i]] = x
+        replay_tokens = replay_tokens + self.temporal_encoding
+        new_x = rearrange(new_x, 'b t d -> t b d',b=B,t=self.fs_topk);replay_tokens = rearrange(replay_tokens, 'b t d -> t b d',b=B,t=T)
+        new_tokens = self.ln_tokens(replay_tokens)#!T,b,d
+        replay_tokens = replay_tokens + self.drop_path(self.attention(new_tokens,self.ln_1(new_x)))
+        replay_tokens = replay_tokens + self.drop_path(self.mlp(self.ln_2(replay_tokens)))
+        return replay_tokens
 class Decoder_ResidualAttentionBlock_time(nn.Module):
     def __init__(self, temp_mode:str,d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.2,dim_mlp=192,fs_topk=8):
         super().__init__()
@@ -204,13 +243,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             cls = cls + self.drop_path(self.attention(ln_cls,ln1))
             if get_frame:
                 attention_map = self.attention(ln_cls,ln1,need_weights=True)
-                topk_index = attention_map.topk(self.fs_topk,-1).indices.sort().values
-                top_section = attention_map>(1/x.shape[0])
-                top_section = torch.nonzero(top_section[0,0], as_tuple=True)[0]
-                first_true_index = top_section[0].item()
-                last_true_index = top_section[-1].item()
-                frame_index = torch.linspace(first_true_index, last_true_index,8).long().unsqueeze(0).unsqueeze(0)
-                return frame_index,cls
+                return attention_map,cls
         elif self.temp_mode =='ba':
             ln_cls = self.ln_cls(self.time_down(cls))
             ln1 = self.ln_1(self.kv_down(x))
@@ -218,7 +251,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             cls = self.time_up(x_cls)+cls
         return cls
 
-class AIM_base_frame_order(nn.Module):
+class AIM_my(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
         super().__init__()
@@ -228,33 +261,33 @@ class AIM_base_frame_order(nn.Module):
         scale = width ** -0.5
         self.layers = layers
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
+        self.embed_dim = 768
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
         self.ln_pre = LayerNorm(width)
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
         self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.use_aim_weight = args.use_aim_weight
+        self.replay_token = args.replay_token
         if args.use_aim_weight:
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
-            
         self.order = args.order
         if self.order:
-            self.frame_token = nn.Parameter(scale * torch.randn(num_frames,width))
             self.temp_head = nn.Linear(width, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
-        self.embed_dim = 768
         self.ba_layers =args.ba_layers
         self.fs_topk = args.fs_topk
         self.n_token_rehearsal = args.n_token_rehearsal
         self.handcrafted_selection = args.handcrafted_selection
         self.selected_selection = args.selected_selection
         self.fs_density = args.fs_density
-        self.replay_token = args.replay_token
+        self.cls_aug = args.cls_aug
         if self.replay_token:
-            self.cls_prompt = nn.ModuleList([nn.Parameter(torch.FloatTensor(num_frames, self.embed_dim), requires_grad=True) for _ in range(args.num_tasks)])
+            self.cls_prompt = nn.Parameter(torch.FloatTensor(args.num_tasks,num_frames, self.embed_dim), requires_grad=True)
             nn.init.uniform_(self.cls_prompt)
+            self.decoder_frame_token = Frame_token_decoder(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk)
         if self.cls_aug:self.aug_adapter = Adapter(width,192) 
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
@@ -267,7 +300,7 @@ class AIM_base_frame_order(nn.Module):
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
-        self.mse = torch.nn.MSELoss()
+        # self.mse = torch.nn.MSELoss()
         
         #!!
         self.each_head = args.each_head
@@ -284,10 +317,14 @@ class AIM_base_frame_order(nn.Module):
                 head.bias.data.mul_(init_scale)
         else:
             self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+            self.head_virtual = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
             trunc_normal_(self.head.weight, std=.02)
+            trunc_normal_(self.head_virtual.weight, std=.02)
             self.init_weights(pretrained='clip')
             self.head.weight.data.mul_(init_scale)
+            self.head_virtual.weight.data.mul_(init_scale)
             self.head.bias.data.mul_(init_scale)
+            self.head_virtual.bias.data.mul_(init_scale)
         if self.cos:
             self.cos_loss = AngularPenaltySMLoss('cosface')
             self.cos_temp = args.cos_temp
@@ -401,7 +438,7 @@ class AIM_base_frame_order(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor, train=False,task_id =-1, replay_token=False,get_frame=False):
+    def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False):
             
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
@@ -417,9 +454,7 @@ class AIM_base_frame_order(nn.Module):
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
         if self.use_aim_weight:#! AIM은 temporal embedding들어옴.
             temporal_embedding=self.temporal_embedding 
-            if self.cls_aug:
-                temporal_embedding = torch.cat([temporal_embedding,temporal_embedding],1)
-            elif temporal_embedding.shape[1]!=(T):
+            if temporal_embedding.shape[1]!=(T):
                 temporal_embedding = F.interpolate(
                     temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
                 ).squeeze(1)
@@ -436,54 +471,27 @@ class AIM_base_frame_order(nn.Module):
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         
-        '''
-        x_norm = x / x.norm(dim=1, keepdim=True)
-        
-         코사인 유사도 맵 계산
-        cosine_similarity_map = torch.matmul(x_norm, x_norm.transpose(0, 1))
-        '''
-        # 
-        # if T<8:
-        #     x = torch.repeat_interleave(x, 8//T, dim=1)
-        #     T=8
         decoder_temporal_embedding=self.decoder_temporal_embedding 
         if decoder_temporal_embedding.shape[1]!=(T):
             decoder_temporal_embedding = F.interpolate(
                 decoder_temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
             ).squeeze(1)
-        # #!
-        # if get_frame:
-        #     decoder_temporal_embedding = F.interpolate(
-        #         decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
-        #     ).squeeze(1)
-    
-        # #!
-        '''
-        x는 원래 CLIP으로 부터 나온 CLS 토큰들
-        cls는 decoder를 위한 새로운 CLS token. 
-        '''
-        cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
+
+        cls_origin = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
+        cls_virtual = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
+        frame_token = self.cls_prompt[task_id].expand(B,-1,-1)# b,t,d
+        frame_token = self.decoder_frame_token(x,frame_token)
         x = x + decoder_temporal_embedding
-        if self.replay_token:
-            cls_prompt = self.cls_prompt[task_id].expand(B,-1,-1)
-            cls_prompt = cls_prompt+decoder_temporal_embedding
-            # frame_token = self.frame_token.expand(B,-1,-1)
-            # cls_and_x = torch.cat([cls,x],1)# B, T+1, D
-            # cls_and_x = cls_and_x + decoder_temporal_embedding
-            # cls_and_x = rearrange(cls_and_x, 'b t d -> t b d',b=B,t=T+1)
-            input_tokens = torch.cat([x,cls_prompt],dim =1)
-            # cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
-            input_tokens = rearrange(x, 'b t d -> t b d',b=B,t=2*T)
-        cls = rearrange(cls, 'b t d -> t b d',b=B,t=1)
-        
-        cls = cls.unsqueeze(0)
-        cls = torch.cat([cls,frame_token.permute(1,0,2)],0)#! 1+frame,b,d
+        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
+        cls_origin = rearrange(cls_origin, 'b t d -> t b d',b=B,t=1)
+        cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
+
         if get_frame:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 if i < (self.ba_layers-1):
                     cls = decoder(cls,x)
                 else:
-                    frame_index,cls = decoder(cls,x,get_frame)
+                    attention_map,cls = decoder(cls,x,get_frame)
             if self.fs_density:
                 density = calculate_density(frame_index,T)
                 if density>30.0:
@@ -495,75 +503,56 @@ class AIM_base_frame_order(nn.Module):
                 else:
                     average_duration = T // 8
                     frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            average_duration = T // 8
+            uniform_index = np.multiply(list(range(8)), average_duration)
             if self.handcrafted_selection:
-                # str_idx = int(T * 1/3)
-                # end_idx = int(T * 2/3)
-                # frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                average_duration = T // 8
-                uniform_index = np.multiply(list(range(8)), average_duration)
-                frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
+                str_idx = int(T * 1/3)
+                end_idx = int(T * 2/3)
+                frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                # average_duration = T // 8
+                # uniform_index = np.multiply(list(range(8)), average_duration)
+                # frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
 
                 # frame_index = torch.tensor([uniform_index[0,0,2], uniform_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 
                 # frame_index 텐서를 생성합니다.
             elif self.selected_selection:
-                selected_indices = torch.randperm(frame_index.size(2))[:4]
-
-                # 선택된 인덱스를 사용하여 정렬된 텐서에서 값을 선택
-                frame_index = torch.sort(torch.index_select(frame_index, dim=2, index=selected_indices),dim=2)[0]
-                # frame_index = torch.tensor([frame_index[0,0,2], frame_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-            
-            #!
-            cls_len = cls.shape[0]
-            cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            cls,frame_token = cls[:,:,:1],cls[:,:,1:]
-            x_final = rearrange(frame_token,'b d t -> b t d',b=B,t=self.num_frames)
-
-
-            cls = cls.unsqueeze(-1).unsqueeze(-1)
-            
-            if self.avg_pool is not None:
-                cls = self.avg_pool(cls)
-            # [N, in_channels, 1, 1, 1]
-            if self.dropout is not None:
-                cls = self.dropout(cls)
-            # [N, in_channels, 1, 1, 1]
-            cls = cls.view(cls.shape[0], -1)
-            logit = self.head(cls)
-            #!
-            # indices = frame_index[0, 0]
-            # gaps = indices[1:] - indices[:-1]
-            # average_gap = gaps.float().mean()
-            # density = T / average_gap
-            return frame_index,T,logit
+                uniform_attention_map = attention_map[:,:,uniform_index]
+                topk_indices = uniform_attention_map.topk(self.fs_topk,-1).indices.squeeze(0).squeeze(0)
+                uniform_index=np.sort((uniform_index[topk_indices.cpu()]))
+                frame_index = torch.tensor(uniform_index,dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            return frame_index,T,None
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls = decoder(cls,x)
-            
-        cls_len = cls.shape[0]
-        cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-        cls,frame_token = cls[:,:,:1],cls[:,:,1:]
-        x_final = rearrange(frame_token,'b d t -> b t d',b=B,t=self.num_frames)
-        #
-        cls = cls.unsqueeze(-1).unsqueeze(-1)
+                cls_origin = decoder(cls_origin,x)
+            for i, decoder in enumerate(self.decoder_transformer_for_cls):
+                cls_virtual = decoder(cls_virtual,frame_token)
+        cls_len = cls_origin.shape[0]
+        cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        token_loss = F.mse_loss(cls_origin, cls_virtual)
+        cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
+        cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         
         if self.avg_pool is not None:
-            cls = self.avg_pool(cls)
-        # [N, in_channels, 1, 1, 1]
+            cls_origin = self.avg_pool(cls_origin)
+            cls_virtual = self.avg_pool(cls_virtual)
+
         if self.dropout is not None:
-            cls = self.dropout(cls)
-        # [N, in_channels, 1, 1, 1]
-        cls = cls.view(cls.shape[0], -1)
-        if self.order:
-            x_final = self.temp_head(x_final)
+            cls_origin = self.dropout(cls_origin)
+            cls_virtual = self.dropout(cls_virtual)
+
+        cls_origin = cls_origin.view(cls_origin.shape[0], -1)
+        cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
+        
         if self.cos:
             cls = F.linear(F.normalize(cls, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
             cls = self.cos_temp * cls  # temperature set as 16
         else:
         # [N, in_channels]
-            cls = self.head(cls)
-        # x_final = (self.temp_head(x_final)) if self.order else None
-        return cls,x_final
+            cls_origin = self.head(cls_origin)
+            cls_virtual = self.head_virtual(cls_virtual)
+        return (cls_origin,cls_virtual),token_loss
     
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산

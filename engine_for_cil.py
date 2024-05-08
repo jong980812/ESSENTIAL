@@ -341,12 +341,14 @@ def train_one_epoch(model: torch.nn.Module,
             model, samples, targets, criterion,mask,task_id,args,device)
         else:
             with torch.cuda.amp.autocast():
-                loss,cls_aug_loss, order_loss,debias_loss,output = train_class_batch(
+                loss,token_loss,virtual_loss,output = train_class_batch(
                 model, samples, targets, criterion,mask,task_id,args,device)
-
+        token_value = token_loss.item()
+        virtual_value = virtual_loss.item()
         loss_value = loss.item()
-        if order_loss is not None:
-            loss+=order_loss
+        loss = loss+token_loss+virtual_loss
+        # if order_loss is not None:
+        #     loss+=order_loss
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
@@ -378,9 +380,11 @@ def train_one_epoch(model: torch.nn.Module,
             
             
         metric_logger.update(loss=loss_value)
-        metric_logger.update(order=order_loss.item()) if order_loss is not None else None 
-        metric_logger.update(cls_aug_loss=cls_aug_loss.item()) if cls_aug_loss is not None else None 
-        metric_logger.update(debias=debias_loss.item()) if debias_loss is not None else None
+        metric_logger.update(loss_virtual=virtual_value)
+        metric_logger.update(loss_token=token_value)
+        # metric_logger.update(order=order_loss.item()) if order_loss is not None else None 
+        # metric_logger.update(cls_aug_loss=cls_aug_loss.item()) if cls_aug_loss is not None else None 
+        # metric_logger.update(debias=debias_loss.item()) if debias_loss is not None else None
         metric_logger.update(class_acc=class_acc)
         metric_logger.update(loss_scale=loss_scale_value)
         min_lr = 10.
@@ -410,18 +414,28 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
-    outputs,_ = model(samples,train=True,task_id=task_id)
+    outputs,token_loss = model(samples,train=True,task_id=task_id)
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
+
     if (mask is not None) and (not args.each_head) and (not args.cos): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
-        outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
+        if len(outputs)==2:
+            origin,virtual = outputs[0],outputs[1]
+            origin = origin.index_fill(dim=1, index=not_mask, value=float('-inf'))
+            virtual = virtual.index_fill(dim=1, index=not_mask, value=float('-inf'))
+        else:
+            outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
     target = target#-first_class
     if args.cos:
         loss = model.module.cos_loss(outputs,target)
     else:
-        loss = criterion(outputs, target)
+        if len(outputs)==2:
+            loss = criterion(origin, target)
+            loss_virtual=criterion(virtual, target)
+        else:
+            loss = criterion(outputs, target)
     
     if args.debias:
         shuffled_indices = np.random.permutation(samples.shape[2])
@@ -444,7 +458,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,args,device
         # loss = loss + order_loss
   
         
-    return loss,(None),(order_loss if args.order else None),(debias_loss if args.debias else None), outputs
+    return loss,(token_loss),(loss_virtual), outputs[0]
 
 
 def get_loss_scale_for_deepspeed(model):

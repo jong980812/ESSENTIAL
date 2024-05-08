@@ -37,6 +37,7 @@ from model.modeling_AIM_custom import AIM_custom
 from model.modeling_AIM_base import AIM_base
 from model.modeling_AIM_base_decoder import AIM_base_decoder
 from model.modeling_AIM_base_frame_order import AIM_base_frame_order
+from model.modeling_AIM_my import AIM_my
 import model.modelling_vmae
 import genetic
 import random
@@ -402,8 +403,8 @@ def main(args, ds_init):
             print('unfreeze list :', unfreeze_list)
         # check = torch.load('/data/jong980812/project/cil/videoCIL/result/lp/ssv2/AIM/109_dim1_50epoch_24/OUT/checkpoint/task10_epoch_50_checkpoint.pth','cpu')['model']
         # print(model.load_state_dict(check))
-    elif args.model == 'AIM_base':
-        model = AIM_base(
+    elif args.model == 'AIM_my':
+        model = AIM_my(
             input_resolution=224,
             patch_size=16,
             num_frames=args.num_frames,
@@ -424,6 +425,11 @@ def main(args, ds_init):
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
+        if args.use_aim_weight is not None:
+            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
+            del weight['head.weight']
+            del weight['head.bias']
+            print(model.load_state_dict(weight,False))
     elif args.model == 'AIM_base_decoder':
         model = AIM_base_decoder(
             input_resolution=224,
