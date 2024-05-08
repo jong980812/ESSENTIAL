@@ -486,12 +486,12 @@ class AIM_base_decoder(nn.Module):
             average_duration = T // 8
             uniform_index = np.multiply(list(range(8)), average_duration)
             if self.handcrafted_selection:
-                # str_idx = int(T * 1/3)
-                # end_idx = int(T * 2/3)
-                # frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                str_idx = int(T * 1/3)
+                end_idx = int(T * 2/3)
+                frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 # average_duration = T // 8
                 # uniform_index = np.multiply(list(range(8)), average_duration)
-                frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
+                # frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
 
                 # frame_index = torch.tensor([uniform_index[0,0,2], uniform_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 
