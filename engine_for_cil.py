@@ -209,6 +209,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             model.module.transformer.eval()
             model.module.conv1.eval()
             for epoch in range(args.rehearsal_epochs):
+                break
                 if (args.data_set=='SSV2') and (task_id==0):# and (not args.use_aim_weight):
                     break 
                 if args.distributed:
@@ -227,6 +228,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         if args.no_valid:
             continue
         # continue
+        pre = torch.load(f'/data/jong980812/project/cil/videoCIL/NIPS/AIM_my/rehearsal_use_virtual/OUT/checkpoint/task{task_id+1}_checkpoint.pth')
+        model.module.load_state_dict(pre['model'],strict = True)
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         acc_list.append(val_stats['stat_matrix'].tolist())

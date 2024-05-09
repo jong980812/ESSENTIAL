@@ -568,7 +568,8 @@ class AIM_my(nn.Module):
             cls = F.linear(F.normalize(cls, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
             cls = self.cos_temp * cls  # temperature set as 16
         else:
-            cls_origin = self.head(cls_origin)
+            virtural = self.head_virtual(cls_origin)
+            cls_origin = self.head(cls_origin) + virtural
         return (cls_origin,None),None
     def rehearsal(self,cls_origin,cls_virtual,x,frame_token):
         B=cls_origin.shape[1]
