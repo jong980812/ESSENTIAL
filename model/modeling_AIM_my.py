@@ -433,7 +433,8 @@ class AIM_my(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor, train=False,task_id =-1,get_frame=False,rehearsal = False):
+    def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
+                get_frame=False,rehearsal = False,inference = False):
             
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
@@ -474,7 +475,10 @@ class AIM_my(nn.Module):
 
         cls_origin = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         cls_virtual = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
-        frame_token = self.cls_prompt[0].expand(B,-1,-1)# b,t,d
+        frame_token = self.cls_prompt[task_id].expand(B,-1,-1)
+        if rehearsal:
+            frame_token=self.cls_prompt[sample_task_id]
+        x = x + decoder_temporal_embedding
         if T!=self.fs_topk:
             new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
             for i in range(B):
@@ -483,24 +487,14 @@ class AIM_my(nn.Module):
                 # x_ = nn.Parameter(x[i, random_indices[i]],required_grad = False)
                 # new_tokens[i, random_indices[i]] = x
         else:
-            new_x = x
+            new_x = x.clone()
         frame_token = self.decoder_frame_token(new_x,frame_token)
-        x = x + decoder_temporal_embedding
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         cls_origin = rearrange(cls_origin, 'b t d -> t b d',b=B,t=1)
         if rehearsal:
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_origin = decoder(cls_origin,frame_token)
-            cls_len = cls_origin.shape[0]
-            cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
-            if self.avg_pool is not None:
-                cls_origin = self.avg_pool(cls_origin)
-            if self.dropout is not None:
-                cls_origin = self.dropout(cls_origin)
-            cls_origin = cls_origin.view(cls_origin.shape[0], -1)
-            cls_origin = self.head(cls_origin)
-            return (cls_origin,None),None
+            return self.rehearsal(cls_origin,frame_token)
+        if inference:
+            return self.inference(cls_origin,x)
         cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
         if get_frame:
             # for i, decoder in enumerate(self.decoder_transformer_for_cls):
@@ -556,9 +550,40 @@ class AIM_my(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = self.head_virtual(cls_virtual)
+            cls_virtual = self.head(cls_virtual)
         return (cls_origin,cls_virtual),token_loss
-    
+    def inference(self,cls_origin,x):
+        B=cls_origin.shape[1]
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls_origin = decoder(cls_origin,x)
+        cls_len = cls_origin.shape[0]
+        cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
+        if self.avg_pool is not None:
+            cls_origin = self.avg_pool(cls_origin)
+        if self.dropout is not None:
+            cls_origin = self.dropout(cls_origin)
+        cls_origin = cls_origin.view(cls_origin.shape[0], -1)
+        if self.cos:
+            cls = F.linear(F.normalize(cls, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+            cls = self.cos_temp * cls  # temperature set as 16
+        else:
+            cls_origin = self.head(cls_origin)
+        return (cls_origin,None),None
+    def rehearsal(self,cls_origin,frame_token):
+        B=cls_origin.shape[1]
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls_origin = decoder(cls_origin,frame_token)
+        cls_len = cls_origin.shape[0]
+        cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
+        if self.avg_pool is not None:
+            cls_origin = self.avg_pool(cls_origin)
+        if self.dropout is not None:
+            cls_origin = self.dropout(cls_origin)
+        cls_origin = cls_origin.view(cls_origin.shape[0], -1)
+        cls_origin = self.head(cls_origin)
+        return (cls_origin,None),None
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
     input_norm = input_tensor.norm(p=2, dim=0, keepdim=True)

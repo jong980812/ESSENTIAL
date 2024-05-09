@@ -123,9 +123,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         for epoch in range(epochs): 
             if args.ssv2_first_finetune is not None and (task_id<1):
                 break
-            if args.joint or args.inference or args.debugging:
+            if args.joint or args.inference or args.debugging or args.no_training:
                 break
-            # break
             # if epoch == epochs-5 and task_id>0:
                 # model.module.transformer.set_first(False)
             if args.distributed:
@@ -225,7 +224,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             num_training_steps_per_epoch=num_training_steps_per_epoch, 
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
-        
+        if args.no_valid:
+            continue
         # continue
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
@@ -300,7 +300,7 @@ def train_one_epoch(model: torch.nn.Module,
     header = header
     print_freq = 10
 
-    for data_iter_step, (samples, targets,vname,_) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (samples, targets,vname,sample_task_id) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue
@@ -342,7 +342,7 @@ def train_one_epoch(model: torch.nn.Module,
         else:
             with torch.cuda.amp.autocast():
                 loss,token_loss,virtual_loss,output = train_class_batch(
-                model, samples, targets, criterion,mask,task_id,args,device,rehearsal)
+                model, samples, targets, criterion,mask,task_id,sample_task_id,args,device,rehearsal)
         if token_loss is not None:
             token_value = token_loss.item()
             loss +=token_loss
@@ -413,12 +413,13 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def train_class_batch(model, samples, target, criterion,mask,task_id,args,device,rehearsal):
+def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal):
     
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
-    outputs,token_loss = model(samples,train=True,task_id=task_id,rehearsal = rehearsal) 
+    outputs,token_loss = model(samples,train=True,task_id=task_id,sample_task_id=sample_task_id,
+                                rehearsal = rehearsal) 
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
 
@@ -515,7 +516,7 @@ def evaluate(model: torch.nn.Module,  data_loader,
                 # selection = selector(videos)
                 # selection_results = selection.argmax(1)#(B)
                 # if args.order:
-                logits,_ = model(videos,train=False,task_id=task_id)
+                logits,_ = model(videos,train=False,task_id=task_id,inference = True)
                 logits = logits[0]
                 # else:
                 # logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
@@ -731,7 +732,8 @@ def save_frame_index(model: torch.nn.Module,
             # pre_label_array = a['label_array']
             pre_dataset_samples = a['dataset_samples']
             pre_selected_frame = a['selected_frame']
-    memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[]}
+            pre_task_id = a['samples_task_id']
+    memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[],'samples_task_id':[]}
     model.eval()
     re_dataset = data_loader[task_id]['rehearsal'].dataset
     re_dataset.all_frames = True
@@ -768,6 +770,7 @@ def save_frame_index(model: torch.nn.Module,
                     memory_video_path['dataset_samples'].append(video_name)
                     memory_video_path['label_array'].append(label)
                     memory_video_path['selected_frame'].append(pre_selected_frame[sample_index])
+                    memory_video_path['samples_task_id'].append(pre_task_id[sample_index])
                     continue
             with torch.cuda.amp.autocast():
                 frame_index,num_frames,logit= model(videos,train=False,task_id=task_id,get_frame = True)
@@ -775,6 +778,7 @@ def save_frame_index(model: torch.nn.Module,
             memory_video_path['dataset_samples'].append(video_name)
             memory_video_path['label_array'].append(label)
             memory_video_path['selected_frame'].append(selected_index.tolist())
+            memory_video_path['samples_task_id'].append(task_id)
             # print(f'Index: {frame_index}, {num_frames} {vname}')
     with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
             json.dump(memory_video_path, file)

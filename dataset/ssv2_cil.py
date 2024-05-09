@@ -54,6 +54,7 @@ class SSVideoClsDataset(Dataset):
         self.dataset_samples = []
         self.label_name_array = []
         self.selected_frame = []
+        self.samples_task_id = []
         if not rehearsal:
             for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
                 for video_info in videos:
@@ -156,6 +157,7 @@ class SSVideoClsDataset(Dataset):
             self.label_array = copy.deepcopy(sample_info['label_array'])
             self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
             self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+            self.samples_task_id = copy.deepcopy(sample_info['samples_task_id'])
     def update_from_sample_selection(self,task_id,args):
         with open(os.path.join(args.output_dir,f'selected_sample_frame_task_{task_id+1}.txt'), 'r') as file:
             sample_info = json.load(file)
@@ -204,7 +206,7 @@ class SSVideoClsDataset(Dataset):
                     buffer = self._aug_frame(buffer, args)
   
             
-            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], {}
+            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], self.task_id
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
@@ -217,7 +219,7 @@ class SSVideoClsDataset(Dataset):
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
             if self.rehearsal:
-                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],{} 
+                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index]
             return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':

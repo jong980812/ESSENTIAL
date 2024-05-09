@@ -289,6 +289,8 @@ def get_args_cil():
     parser.add_argument('--uniform_ratio', default=0.5, type=float)
     parser.add_argument('--rehearsal_samples_per_class', default=20, type=int)
     parser.add_argument('--replay_token', default=False, action='store_true')
+    parser.add_argument('--no_valid', default=False, action='store_true')
+    parser.add_argument('--no_training', default=False, action='store_true')
 
 
     known_args, _ = parser.parse_known_args()
