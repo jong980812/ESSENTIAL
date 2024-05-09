@@ -491,11 +491,11 @@ class AIM_my(nn.Module):
         frame_token = self.decoder_frame_token(new_x,frame_token)
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         cls_origin = rearrange(cls_origin, 'b t d -> t b d',b=B,t=1)
-        if rehearsal:
-            return self.rehearsal(cls_origin,frame_token)
         if inference:
             return self.inference(cls_origin,x)
         cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
+        if rehearsal:
+            return self.rehearsal(cls_origin,cls_virtual,x,frame_token)
         if get_frame:
             # for i, decoder in enumerate(self.decoder_transformer_for_cls):
             #     if i < (self.ba_layers-1):
@@ -550,7 +550,7 @@ class AIM_my(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = self.head(cls_virtual)
+            cls_virtual = self.head_virtual(cls_virtual)
         return (cls_origin,cls_virtual),token_loss
     def inference(self,cls_origin,x):
         B=cls_origin.shape[1]
@@ -570,20 +570,37 @@ class AIM_my(nn.Module):
         else:
             cls_origin = self.head(cls_origin)
         return (cls_origin,None),None
-    def rehearsal(self,cls_origin,frame_token):
+    def rehearsal(self,cls_origin,cls_virtual,x,frame_token):
         B=cls_origin.shape[1]
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
-            cls_origin = decoder(cls_origin,frame_token)
+            cls_origin = decoder(cls_origin,x)
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls_virtual = decoder(cls_virtual,frame_token)
         cls_len = cls_origin.shape[0]
         cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        token_loss = F.mse_loss(cls_origin, cls_virtual)
         cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
+        cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         if self.avg_pool is not None:
             cls_origin = self.avg_pool(cls_origin)
+            cls_virtual = self.avg_pool(cls_virtual)
+
         if self.dropout is not None:
             cls_origin = self.dropout(cls_origin)
+            cls_virtual = self.dropout(cls_virtual)
+
         cls_origin = cls_origin.view(cls_origin.shape[0], -1)
-        cls_origin = self.head(cls_origin)
-        return (cls_origin,None),None
+        cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
+        
+        if self.cos:
+            cls = F.linear(F.normalize(cls, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+            cls = self.cos_temp * cls  # temperature set as 16
+        else:
+        # [N, in_channels]
+            cls_origin = self.head(cls_origin)
+            cls_virtual = self.head_virtual(cls_virtual)
+        return (cls_origin,cls_virtual),token_loss
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
     input_norm = input_tensor.norm(p=2, dim=0, keepdim=True)
