@@ -502,7 +502,7 @@ class AIM_prompt(nn.Module):
             virtual_x = torch.cat([frame_token[:,:2],new_x[:,0:1],frame_token[:,3:5],new_x[:,1:2],frame_token[:,6:]],dim=1)
             virtual_x = virtual_x+decoder_temporal_embedding    
             # x = rearrange(x, 'b t d -> t b d',b=B,t=self.fs_topk)
-            # virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=8)
+            virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=8)
             cls_origin = cls_origin.transpose(0,1);cls_virtual=cls_virtual.transpose(0,1)
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 cls_origin = decoder(cls_origin,virtual_x)
