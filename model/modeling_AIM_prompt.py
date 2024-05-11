@@ -498,16 +498,16 @@ class AIM_prompt(nn.Module):
             x = x + decoder_temporal_embedding[:,[2,5]]
             new_x = x.clone().detach()
             with torch.no_grad():
-                frame_token = self.make_frame_token(new_x,sample_task_id).transpose(0,1)
+                frame_token = self.make_frame_token(new_x,sample_task_id).transpose(0,1).clone().detach()
             virtual_x = torch.cat([frame_token[:,:2],new_x[:,0:1],frame_token[:,3:5],new_x[:,1:2],frame_token[:,6:]],dim=1)
             virtual_x = virtual_x+decoder_temporal_embedding    
-            x = rearrange(x, 'b t d -> t b d',b=B,t=self.fs_topk)
-            virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=8)
+            # x = rearrange(x, 'b t d -> t b d',b=B,t=self.fs_topk)
+            # virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=8)
             cls_origin = cls_origin.transpose(0,1);cls_virtual=cls_virtual.transpose(0,1)
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_origin = decoder(cls_origin,x)
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_virtual = decoder(cls_virtual,virtual_x)                    
+                cls_origin = decoder(cls_origin,virtual_x)
+            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            #     cls_virtual = decoder(cls_virtual,virtual_x)                    
             cls_origin = cls_origin.permute(1,2,0);cls_virtual=cls_virtual.permute(1,2,0)
             # new_x = new_x + topk_temporal_embedding
             cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
@@ -518,14 +518,14 @@ class AIM_prompt(nn.Module):
             cls_origin = cls_origin.view(cls_origin.shape[0], -1)
             cls_origin = self.head(cls_origin)
             
-            cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
-            if self.avg_pool is not None:
-                cls_virtual = self.avg_pool(cls_virtual)
-            if self.dropout is not None:
-                cls_virtual = self.dropout(cls_virtual)
-            cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
-            cls_virtual = self.head(cls_virtual)
-            return (cls_origin,cls_virtual),None
+            # cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
+            # if self.avg_pool is not None:
+            #     cls_virtual = self.avg_pool(cls_virtual)
+            # if self.dropout is not None:
+            #     cls_virtual = self.dropout(cls_virtual)
+            # cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
+            # cls_virtual = self.head(cls_virtual)
+            return (cls_origin,None),None
                         
         elif inference:
             x = x + decoder_temporal_embedding
