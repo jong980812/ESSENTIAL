@@ -275,8 +275,9 @@ class Frame_propmt(nn.Module):
                 p=self.prompts[task_id[i]].unsqueeze(0)
                 batch.append(p)
             P = torch.cat(batch, dim=0)
-        new_frames = self.attention(self.ln_1(P.transpose(0,1)),self.ln_1(x_query.transpose(0,1)))
-        return new_frames
+        P = P.transpose(0,1);x_query=x_query.transpose(0,1)       
+        P = P+self.attention(self.ln_1(P),self.ln_1(x_query))
+        return P
 class AIM_prompt(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,adapter_layers=[],class_mask=None,args=None):
@@ -407,7 +408,7 @@ class AIM_prompt(nn.Module):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
     def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
-                get_frame=False,rehearsal = False,inference = False):
+                get_frame=False,rehearsal = False,inference = False,frame_making=False):
             
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
@@ -457,26 +458,26 @@ class AIM_prompt(nn.Module):
         cls_origin = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         cls_virtual = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         
-        if train and not rehearsal:
+        if train and (not rehearsal) and not frame_making:
             x = x + decoder_temporal_embedding
-            new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
-            for i in range(B):
-                new_x[i] = x[i,[2,5]].clone()
+            # new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
+            # for i in range(B):
+            #     new_x[i] = x[i,[2,5]].clone()
             
-            frame_token = self.make_frame_token(new_x,task_id).transpose(0,1)
-            virtual_x = torch.cat([frame_token[:,:2],new_x[:,0:1],frame_token[:,3:5],new_x[:,1:2],frame_token[:,6:]],dim=1)
-            virtual_x = virtual_x+decoder_temporal_embedding
+            # frame_token = self.make_frame_token(new_x,task_id).transpose(0,1)
+            # virtual_x = torch.cat([frame_token[:,:2],new_x[:,0:1],frame_token[:,3:5],new_x[:,1:2],frame_token[:,6:]],dim=1)
+            # virtual_x = virtual_x+decoder_temporal_embedding
             #! b,t,d
             x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-            virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=T)
-            cls_origin = cls_origin.transpose(0,1);cls_virtual=cls_virtual.transpose(0,1)
+            # virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=T)
+            cls_origin = cls_origin.transpose(0,1)#;cls_virtual=cls_virtual.transpose(0,1)
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 cls_origin = decoder(cls_origin,x)
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_virtual = decoder(cls_virtual,virtual_x)
+            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
+                # cls_virtual = decoder(cls_virtual,virtual_x)
             #! t,b,d
-            cls_origin = cls_origin.permute(1,2,0);cls_virtual=cls_virtual.permute(1,2,0)
-            token_loss = F.mse_loss(cls_origin, cls_virtual)
+            cls_origin = cls_origin.permute(1,2,0)#;cls_virtual=cls_virtual.permute(1,2,0)
+            # token_loss = F.mse_loss(cls_origin, cls_virtual)
             
             cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
             if self.avg_pool is not None:
@@ -486,14 +487,14 @@ class AIM_prompt(nn.Module):
             cls_origin = cls_origin.view(cls_origin.shape[0], -1)
             cls_origin = self.head(cls_origin)
             
-            cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
-            if self.avg_pool is not None:
-                cls_virtual = self.avg_pool(cls_virtual)
-            if self.dropout is not None:
-                cls_virtual = self.dropout(cls_virtual)
-            cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
-            cls_virtual = self.head(cls_virtual)
-            return (cls_origin,cls_virtual),token_loss
+            # cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
+            # if self.avg_pool is not None:
+            #     cls_virtual = self.avg_pool(cls_virtual)
+            # if self.dropout is not None:
+            #     cls_virtual = self.dropout(cls_virtual)
+            # cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
+            # cls_virtual = self.head(cls_virtual)
+            return (cls_origin,None),None
         elif rehearsal:
             x = x + decoder_temporal_embedding[:,[2,5]]
             new_x = x.clone().detach()
@@ -503,12 +504,12 @@ class AIM_prompt(nn.Module):
             virtual_x = virtual_x+decoder_temporal_embedding    
             # x = rearrange(x, 'b t d -> t b d',b=B,t=self.fs_topk)
             virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=8)
-            cls_origin = cls_origin.transpose(0,1);cls_virtual=cls_virtual.transpose(0,1)
+            cls_origin = cls_origin.transpose(0,1)#;cls_virtual=cls_virtual.transpose(0,1)
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
                 cls_origin = decoder(cls_origin,virtual_x)
             # for i, decoder in enumerate(self.decoder_transformer_for_cls):
             #     cls_virtual = decoder(cls_virtual,virtual_x)                    
-            cls_origin = cls_origin.permute(1,2,0);cls_virtual=cls_virtual.permute(1,2,0)
+            cls_origin = cls_origin.permute(1,2,0)#;cls_virtual=cls_virtual.permute(1,2,0)
             # new_x = new_x + topk_temporal_embedding
             cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
             if self.avg_pool is not None:
@@ -526,7 +527,27 @@ class AIM_prompt(nn.Module):
             # cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
             # cls_virtual = self.head(cls_virtual)
             return (cls_origin,None),None
-                        
+        elif frame_making:
+            x = x + decoder_temporal_embedding
+            new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
+            for i in range(B):
+                new_x[i] = x[i,[2,5]].clone()
+            
+            virtual_x = self.make_frame_token(new_x,task_id).transpose(0,1)
+            # virtual_x = torch.cat([frame_token[:,:2],new_x[:,0:1],frame_token[:,3:5],new_x[:,1:2],frame_token[:,6:]],dim=1)
+            virtual_x = virtual_x+decoder_temporal_embedding
+            #! b,t,d
+            x = rearrange(x, 'b t d -> t b d',b=B,t=T)
+            virtual_x = rearrange(virtual_x, 'b t d -> t b d',b=B,t=T)
+            cls_origin = cls_origin.transpose(0,1);cls_virtual=cls_virtual.transpose(0,1)
+            for i, decoder in enumerate(self.decoder_transformer_for_cls):
+                cls_origin = decoder(cls_origin,x)
+            for i, decoder in enumerate(self.decoder_transformer_for_cls):
+                cls_virtual = decoder(cls_virtual,virtual_x)
+            #! t,b,d
+            cls_origin = cls_origin.permute(1,2,0);cls_virtual=cls_virtual.permute(1,2,0)
+            token_loss = F.mse_loss(cls_origin, cls_virtual)
+            return (None,None),token_loss             
         elif inference:
             x = x + decoder_temporal_embedding
             x = rearrange(x, 'b t d -> t b d',b=B,t=T)

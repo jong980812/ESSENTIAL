@@ -273,6 +273,7 @@ def get_args_cil():
     parser.add_argument('--ba_dim', default=192, type=int)
     parser.add_argument('--temp_mode', default='ba', type=str)
     parser.add_argument('--unfreeze_layers_after_base', default=None, nargs='+', type=str)
+    parser.add_argument('--unfreeze_layers_frame_making', default=None, nargs='+', type=str)
     parser.add_argument('--ssv2_first_finetune', default=None, type=str)
     parser.add_argument('--get_frame_index', action='store_true', default=False, help='')
     parser.add_argument('--fs_topk', default=8, type=int)
@@ -292,6 +293,7 @@ def get_args_cil():
     parser.add_argument('--replay_token', default=False, action='store_true')
     parser.add_argument('--no_valid', default=False, action='store_true')
     parser.add_argument('--no_training', default=False, action='store_true')
+    parser.add_argument('--frame_making', default=False, action='store_true')
 
 
     known_args, _ = parser.parse_known_args()

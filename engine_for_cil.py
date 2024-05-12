@@ -164,8 +164,45 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                         }
                 utils.save_on_master(state_dict, checkpoint_path)
 
-           
-        #! Saving CLS TOken
+        #!************************ Frame making *************************************
+        if args.frame_making:
+            warmup_epochs,epochs = args.warmup_epochs//2,args.epochs//2
+            print("Use step level LR scheduler!")
+            lr_schedule_values = utils.cosine_scheduler(
+                args.lr, args.min_lr, epochs, num_training_steps_per_epoch,
+                warmup_epochs=warmup_epochs, warmup_steps=args.warmup_steps,
+            )
+            if args.weight_decay_end is None:
+                args.weight_decay_end = args.weight_decay
+            wd_schedule_values = utils.cosine_scheduler(
+            args.weight_decay, args.weight_decay_end, epochs, num_training_steps_per_epoch)
+            model.module.unfreeze(args.unfreeze_layers_frame_making)
+            model.to(args.device)
+            
+            optimizer = create_optimizer(
+            args, model_without_ddp, skip_list=args.skip_weight_decay_list,
+            get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
+            get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
+            loss_scaler = NativeScaler()
+            n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            print(f'*******Frame_making {task_id+1} params: {n_parameters}*******')  
+            for epoch in range(epochs): 
+                # if epoch == epochs-5 and task_id>0:
+                    # model.module.transformer.set_first(False)
+                if args.distributed:
+                    data_loader[task_id]['train'].sampler.set_epoch(epoch)   
+                header = f'Frame Making {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {epochs}]'
+                _ = train_one_epoch(model=model, criterion=criterion, 
+                                            data_loader=data_loader[task_id]['train'], optimizer=optimizer, 
+                                            device=device, epoch=epoch, max_norm=args.clip_grad, 
+                                            set_training_mode=True, task_id=task_id, class_mask=class_mask, args=args,
+                                            start_steps=epoch * num_training_steps_per_epoch,
+                                            lr_schedule_values=lr_schedule_values, 
+                                            wd_schedule_values=wd_schedule_values,
+                                            num_training_steps_per_epoch=num_training_steps_per_epoch, 
+                                            update_freq=args.update_freq, header= header,loss_scaler=loss_scaler,rehearsal=False,frame_making=True
+                                            )            
+        #! Saving CLS TOken*****************************************************************************
         if args.get_frame_index:
             if utils.is_main_process():
                 save_frame_index(model=model,data_loader=data_loader,device = device, task_id=task_id, class_mask = None, args = args)
@@ -287,7 +324,8 @@ def train_one_epoch(model: torch.nn.Module,
                     device: torch.device, epoch: int, max_norm: float = 0,
                     set_training_mode=True, task_id=-1, class_mask=None, args = None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None,header=None,loss_scaler=None, rehearsal = False
+                    num_training_steps_per_epoch=None, update_freq=None,header=None,loss_scaler=None, rehearsal = False,
+                    frame_making=False
                     ):
 
     model.train(set_training_mode)
@@ -345,13 +383,17 @@ def train_one_epoch(model: torch.nn.Module,
         else:
             with torch.cuda.amp.autocast():
                 loss,token_loss,virtual_loss,output = train_class_batch(
-                model, samples, targets, criterion,mask,task_id,sample_task_id,args,device,rehearsal)
+                model, samples, targets, criterion,mask,task_id,sample_task_id,args,device,
+                rehearsal,
+                frame_making)
+        if loss is None:
+            loss = torch.tensor(0.).to(device)
         if token_loss is not None:
             token_value = token_loss.item()
             loss +=token_loss
         if virtual_loss is not None:
             virtual_value = virtual_loss.item()
-            loss +=0.5*virtual_loss
+            loss +=virtual_loss
         loss_value = loss.item()
 
         # if order_loss is not None:
@@ -380,7 +422,7 @@ def train_one_epoch(model: torch.nn.Module,
 
         torch.cuda.synchronize()
 
-        if args.mixup_fn is None:
+        if args.mixup_fn is None and not frame_making:
             class_acc = (output.max(-1)[-1] == targets).float().mean()
         else:
             class_acc = None
@@ -416,13 +458,13 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal):
+def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal,frame_making):
     
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
     outputs,token_loss = model(samples,train=True,task_id=task_id,sample_task_id=sample_task_id,
-                                rehearsal = rehearsal) 
+                                rehearsal = rehearsal,frame_making=frame_making) 
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
 
@@ -431,7 +473,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
         if len(outputs)==2:
             origin,virtual = outputs[0],outputs[1]
-            origin = origin.index_fill(dim=1, index=not_mask, value=float('-inf'))
+            if origin is not None:origin = origin.index_fill(dim=1, index=not_mask, value=float('-inf'))
             if virtual is not None:virtual = virtual.index_fill(dim=1, index=not_mask, value=float('-inf'))
         else:
             outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
@@ -440,7 +482,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
         loss = model.module.cos_loss(outputs,target)
     else:
         if len(outputs)==2:
-            loss = criterion(origin, target)
+            loss = criterion(origin, target) if origin is not None else None
             loss_virtual=criterion(virtual, target) if virtual is not None else None
         else:
             loss = criterion(outputs, target)
