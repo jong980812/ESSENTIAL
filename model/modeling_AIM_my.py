@@ -280,8 +280,9 @@ class AIM_my(nn.Module):
         self.fs_density = args.fs_density
         self.cls_aug = args.cls_aug
         if self.replay_token:
-            self.cls_prompt = nn.Parameter(torch.FloatTensor(10,num_frames, self.embed_dim), requires_grad=True)
-            nn.init.uniform_(self.cls_prompt)
+            self.cls_prompt =nn.ParameterList([nn.Parameter(torch.FloatTensor(num_frames, self.embed_dim), requires_grad=True) for i in range(args.num_tasks)])
+            for i in range(args.num_tasks):
+                nn.init.uniform_(self.cls_prompt[i])
             self.decoder_frame_token = Frame_token_decoder(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk)
         if self.cls_aug:self.aug_adapter = Adapter(width,192) 
         if self.order:
@@ -482,7 +483,7 @@ class AIM_my(nn.Module):
         if T!=self.fs_topk:
             new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
             for i in range(B):
-                new_x[i] = x[i,[2,5]]
+                new_x[i] = x[i,np.sort(np.random.choice(range(8),4,False))]
                 # indice = random_indices[i]
                 # x_ = nn.Parameter(x[i, random_indices[i]],required_grad = False)
                 # new_tokens[i, random_indices[i]] = x
@@ -508,12 +509,18 @@ class AIM_my(nn.Module):
                 # str_idx = int(T * 1/3)
                 # end_idx = int(T * 2/3)
                 # frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                # average_duration = T // 8
+                # uniform_index = np.multiply(list(range(8)), average_duration)
+                # # frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
+
+                # frame_index = torch.tensor([uniform_index[2], uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                
                 average_duration = T // 8
                 uniform_index = np.multiply(list(range(8)), average_duration)
-                # frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
 
-                frame_index = torch.tensor([uniform_index[2], uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                
+                # frame_index = torch.tensor([uniform_index[0,0,2], uniform_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                                
                 # frame_index 텐서를 생성합니다.
             # elif self.selected_selection:
             #     uniform_attention_map = attention_map[:,:,uniform_index]
