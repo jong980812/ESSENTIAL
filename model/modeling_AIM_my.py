@@ -314,14 +314,14 @@ class AIM_my(nn.Module):
                 head.bias.data.mul_(init_scale)
         else:
             self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-            self.head_virtual = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+            # self.head_virtual = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
             trunc_normal_(self.head.weight, std=.02)
-            trunc_normal_(self.head_virtual.weight, std=.02)
+            # trunc_normal_(self.head_virtual.weight, std=.02)
             self.init_weights(pretrained='clip')
             self.head.weight.data.mul_(init_scale)
-            self.head_virtual.weight.data.mul_(init_scale)
+            # self.head_virtual.weight.data.mul_(init_scale)
             self.head.bias.data.mul_(init_scale)
-            self.head_virtual.bias.data.mul_(init_scale)
+            # self.head_virtual.bias.data.mul_(init_scale)
         if self.cos:
             self.cos_loss = AngularPenaltySMLoss('cosface')
             self.cos_temp = args.cos_temp
@@ -434,11 +434,7 @@ class AIM_my(nn.Module):
     @torch.jit.ignore
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
-
-    def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
-                get_frame=False,rehearsal = False,inference = False,frame_making=False):
-            
-        # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
+    def get_cls_tokens(self,x):
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
             x = x.unsqueeze(2)
         B, C, T, H, W = x.shape 
@@ -468,6 +464,17 @@ class AIM_my(nn.Module):
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
+        return x
+    def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
+                get_frame=False,rehearsal = False,inference = False,frame_making=False):
+            
+        B, C, T, H, W = x.shape 
+        # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
+        if rehearsal:
+            with torch.no_grad():
+                x = self.get_cls_tokens(x)
+        else:
+            x = self.get_cls_tokens(x)
         
         decoder_temporal_embedding=self.decoder_temporal_embedding 
         if decoder_temporal_embedding.shape[1]!=(T):
@@ -505,36 +512,13 @@ class AIM_my(nn.Module):
         if rehearsal:
             return self.rehearsal(cls_origin,cls_virtual,x,frame_token)
         if get_frame:
-            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
-            #     if i < (self.ba_layers-1):
-            #         cls = decoder(cls,x)
-            #     else:
-            #         attention_map,cls = decoder(cls,x,get_frame)
-            # average_duration = T // 8
-            # uniform_index = np.multiply(list(range(8)), average_duration)
             if self.handcrafted_selection:
-                # str_idx = int(T * 1/3)
-                # end_idx = int(T * 2/3)
-                # frame_index = torch.tensor([str_idx, end_idx], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # average_duration = T // 8
-                # uniform_index = np.multiply(list(range(8)), average_duration)
-                # # frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
-
-                
                 average_duration = T // 8
                 uniform_index = np.multiply(list(range(8)), average_duration)
-                # frame_index = torch.tensor(list(np.sort(np.random.choice(uniform_index,4,False))),dtype = torch.int32).unsqueeze(0).unsqueeze(0)
-                # frame_index = torch.tensor([uniform_index[1], uniform_index[3],uniform_index[5],uniform_index[7],], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                frame_index = torch.tensor([uniform_index[2],uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-
-                # frame_index = torch.tensor([uniform_index[0,0,2], uniform_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                                
-                # frame_index 텐서를 생성합니다.
-            # elif self.selected_selection:
-            #     uniform_attention_map = attention_map[:,:,uniform_index]
-            #     topk_indices = uniform_attention_map.topk(self.fs_topk,-1).indices.squeeze(0).squeeze(0)
-            #     uniform_index=np.sort((uniform_index[topk_indices.cpu()]))
-            #     frame_index = torch.tensor(uniform_index,dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                if self.fs_topk==2:
+                    frame_index = torch.tensor([uniform_index[2],uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                elif self.fs_topk==4:
+                    frame_index = torch.tensor([uniform_index[1],uniform_index[3],uniform_index[5],uniform_index[7]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)  
             return frame_index,T,None
         else:
             for i, decoder in enumerate(self.decoder_transformer_for_cls):
@@ -567,7 +551,7 @@ class AIM_my(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = self.head_virtual(cls_virtual)
+            cls_virtual = self.head(cls_virtual)
         return (cls_origin,cls_virtual),token_loss
     def inference(self,cls_origin,x):
         B=cls_origin.shape[1]
@@ -619,7 +603,7 @@ class AIM_my(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = self.head_virtual(cls_virtual)
+            cls_virtual = self.head(cls_virtual)
         return (cls_origin,cls_virtual),token_loss
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
