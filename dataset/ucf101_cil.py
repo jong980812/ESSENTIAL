@@ -36,6 +36,9 @@ class UCFVideoClsDataset(Dataset):
         self.rand_erase = False
         self.return_text=False
         self.all_frames = all_frames
+        self.task_id = task_id
+        self.set_selection_frame = False
+        self.uniform_ratio = args.uniform_ratio
         self.rehearsal = rehearsal
         if self.mode in ['train']:
             self.aug = True
@@ -46,6 +49,8 @@ class UCFVideoClsDataset(Dataset):
         self.label_array = []
         self.dataset_samples = []
         self.label_name_array = []
+        self.selected_frame = []
+        self.samples_task_id = []
         if not rehearsal:
             for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
                 for video_info in videos:
@@ -120,6 +125,14 @@ class UCFVideoClsDataset(Dataset):
                         self.test_label_array.append(sample_label)
                         self.test_dataset.append(self.dataset_samples[idx])
                         self.test_seg.append((ck, cp))
+                        
+    def update_rehearsal(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+            self.samples_task_id = copy.deepcopy(sample_info['samples_task_id'])
 
     def __getitem__(self, index):
         if self.mode == 'train':
@@ -127,7 +140,8 @@ class UCFVideoClsDataset(Dataset):
             scale_t = 1
 
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t) # T H W C
+            # buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t) # T H W C
+            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index,uniform_ratio=self.uniform_ratio) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during training".format(sample))
@@ -149,11 +163,12 @@ class UCFVideoClsDataset(Dataset):
             else:
                 buffer = self._aug_frame(buffer, args)
             
-            return buffer, self.label_array[index], index, {}
+            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], self.task_id
+
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames)
+            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index,uniform_ratio=2.0)
             # buffer = self.loadvideo_decord(sample,self.rehearsal)
             if len(buffer) == 0:
                 while len(buffer) == 0:
@@ -163,8 +178,8 @@ class UCFVideoClsDataset(Dataset):
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
             if self.rehearsal:
-                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],{} 
-            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
+                return buffer, self.label_array[index], sample,self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index]
+            return buffer, self.label_array[index], sample
 
         elif self.mode == 'test':
             sample = self.test_dataset[index]
@@ -262,7 +277,7 @@ class UCFVideoClsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample,rehearsal=False, sample_rate_scale=1,all_frames=False):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1,uniform_ratio=0.5):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)+'.avi'
         if not (os.path.exists(fname)):
@@ -311,6 +326,8 @@ class UCFVideoClsDataset(Dataset):
         all_index = list(np.array(all_index)) 
         if all_frames:
             all_index = [i for i in range(len(vr))]
+        if len(self.selected_frame)>0:#! update되었단 뜻.
+            all_index = self.selected_frame[index]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
         return buffer

@@ -479,7 +479,12 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
             outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
     target = target#-first_class
     if args.cos:
-        loss = model.module.cos_loss(outputs,target)
+        if len(outputs)==2:
+            origin,virtual = outputs[0],outputs[1]
+            loss = model.module.cos_loss(origin,target)
+            loss_virtual = model.module.cos_loss(virtual,target)
+        else:
+            loss = model.module.cos_loss(outputs,target)
     else:
         if len(outputs)==2:
             loss = criterion(origin, target) if origin is not None else None
@@ -807,7 +812,7 @@ def save_frame_index(model: torch.nn.Module,
 
             # compute output
 
-            video_name = vname[0]+'.mp4'
+            video_name = vname[0]+('.mp4' if args.data_set!='UCF101' else '')
             label = int(target.cpu())
             if task_id!=0:
                 if (video_name in pre_dataset_samples):

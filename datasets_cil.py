@@ -118,7 +118,8 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             new_width=320,
             args=args,
             task_id = task_id,
-            rehearsal=rehearsal
+            rehearsal=rehearsal,
+            all_frames=all_frames,
             )
     elif args.data_set == 'ActivityNet':
 
