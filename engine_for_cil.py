@@ -393,7 +393,7 @@ def train_one_epoch(model: torch.nn.Module,
             loss +=token_loss
         if virtual_loss is not None:
             virtual_value = virtual_loss.item()
-            loss +=virtual_loss
+            loss +=0.5*virtual_loss
         loss_value = loss.item()
 
         # if order_loss is not None:
