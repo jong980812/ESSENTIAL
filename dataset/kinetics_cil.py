@@ -54,6 +54,7 @@ class KineticsDataset(Dataset):
         self.rehearsal=rehearsal
         self.rand_erase = False
         self.return_text=False
+        self.task_id = task_id
         self.all_frames = all_frames
         if loader == 'decord':
             self.loader = self.loadvideo_decord
@@ -74,6 +75,7 @@ class KineticsDataset(Dataset):
         self.dataset_samples = []
         self.label_name_array = []
         self.selected_frame = []
+        self.samples_task_id = []
         if not rehearsal:
             for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
                 for video_info in videos:
@@ -151,6 +153,14 @@ class KineticsDataset(Dataset):
                         self.test_label_array.append(sample_label)
                         self.test_dataset.append(self.dataset_samples[idx])
                         self.test_seg.append((ck, cp))
+                        
+    def update_rehearsal(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+            self.samples_task_id = copy.deepcopy(sample_info['samples_task_id'])
 
     def __getitem__(self, index):
         if self.mode == 'train':
@@ -180,11 +190,11 @@ class KineticsDataset(Dataset):
             else:
                 buffer = self._aug_frame(buffer, args)
             
-            return buffer, self.label_array[index], index, {}
+            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], self.task_id, {}
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index)
+            buffer,all_index = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -193,7 +203,7 @@ class KineticsDataset(Dataset):
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
             if self.rehearsal:
-                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],{} 
+                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index],all_index 
             return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':
@@ -294,7 +304,7 @@ class KineticsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1,uniform_ratio=0.5):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
 
@@ -331,28 +341,31 @@ class KineticsDataset(Dataset):
         all_index = []
         for i in range(self.num_segment):
             if seg_len <= converted_len:
-                index = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
-                index = np.concatenate((index, np.ones(self.clip_len - seg_len // self.frame_sample_rate) * seg_len))
-                index = np.clip(index, 0, seg_len - 1).astype(np.int64)
+                index_ = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
+                index_ = np.concatenate((index_, np.ones(self.clip_len - seg_len // self.frame_sample_rate) * seg_len))
+                index_ = np.clip(index_, 0, seg_len - 1).astype(np.int64)
             else:
                 if not rehearsal:
                     end_idx = np.random.randint(converted_len, seg_len)
                 else:
                     points = np.linspace(converted_len, seg_len, 4, endpoint=True)
-                    end_idx = int(np.random.choice(points))
+                    end_idx = int((points[1]))
                 str_idx = end_idx - converted_len
-                index = np.linspace(str_idx, end_idx, num=self.clip_len)
-                index = np.clip(index, str_idx, end_idx - 1).astype(np.int64)
-            index = index + i*seg_len
-            all_index.extend(list(index))
+                index_ = np.linspace(str_idx, end_idx, num=self.clip_len)
+                index_ = np.clip(index_, str_idx, end_idx - 1).astype(np.int64)
+            index_ = index_ + i*seg_len
+            all_index.extend(list(index_))
         if all_frames:
-            all_index = [i for i in range(len(vr))] 
+            # all_index = [i for i in range(len(vr))] 
+            vr.seek(0)
+            buffer = vr.get_batch(all_index).asnumpy()
+            return buffer,all_index
         if len(self.selected_frame)>0:#! update되었단 뜻.
             all_index = self.selected_frame[index]
         all_index = all_index[::int(sample_rate_scale)]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
-        return buffer
+        return buffer, all_index
 
     def __len__(self):
         if self.mode != 'test':

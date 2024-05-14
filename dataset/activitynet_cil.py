@@ -38,7 +38,8 @@ class ActivitynetDataset(Dataset):
     def __init__(self, anno_list, data_path, mode='train', clip_len=8,
                  crop_size=224, short_side_size=256,
                  new_height=256, new_width=340, keep_aspect_ratio=True,
-                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,loader='decord',rehearsal=False):
+                 num_segment=1, num_crop=1, test_num_segment=10, test_num_crop=3,args=None,task_id =-1,
+                 loader='decord',rehearsal=False, all_frames = False):
         self.anno_list = anno_list
         self.data_path = data_path
         self.mode = mode
@@ -55,6 +56,10 @@ class ActivitynetDataset(Dataset):
         self.args = args
         self.aug = False
         self.rand_erase = False
+        self.all_frames = all_frames
+        self.task_id = task_id
+        self.set_selection_frame = False
+        self.rehearsal = rehearsal
         if loader == 'decord':
             self.loader = self.loadvideo_decord
         elif loader =='pyav':
@@ -73,6 +78,8 @@ class ActivitynetDataset(Dataset):
         self.label_array = []
         self.dataset_samples = []
         self.label_name_array=[]
+        self.selected_frame = []
+        self.samples_task_id = []
         # if not rehearsal:
         #     for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
         #         for video_info in videos:
@@ -92,7 +99,7 @@ class ActivitynetDataset(Dataset):
                 args.memory_video_path = json.load(file)
             self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
             self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
-            self.mode ='train'
+            # self.mode ='train'
 
 
 
@@ -161,8 +168,7 @@ class ActivitynetDataset(Dataset):
             if end_ratio > 1:
                 end_ratio = 1.0
             video_name = video_info['filename']
-            
-            buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
+            buffer = self.loadvideo_decord(video_name,start_ratio,end_ratio,all_frames=False,rehearsal=False,index=index) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     print("video {} not correctly loaded during training".format(video_name))
@@ -191,7 +197,7 @@ class ActivitynetDataset(Dataset):
             else:
                 buffer = self._aug_frame(buffer, args)
             
-            return buffer, self.label_array[index], index, {}
+            return buffer, self.label_array[index], index, self.task_id
 
         elif self.mode == 'validation':
             video_info = self.dataset_samples[index]
@@ -202,7 +208,7 @@ class ActivitynetDataset(Dataset):
 
             video_name = video_info['filename']
 
-            buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
+            buffer = self.loader(video_name,start_ratio,end_ratio,all_frames = self.all_frames,rehearsal=self.rehearsal,index = index) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     print("video {} not correctly loaded during validation".format(video_info))
@@ -215,6 +221,8 @@ class ActivitynetDataset(Dataset):
                     video_name = video_info['filename']
                     buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             buffer = self.data_transform(buffer)
+            if self.rehearsal:
+                return buffer, self.label_array[index], video_info,self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index]
             return buffer, self.label_array[index], video_name.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':
@@ -364,7 +372,7 @@ class ActivitynetDataset(Dataset):
 
         return buffer
 
-    def loadvideo_decord(self, video_name,start_ratio,end_ratio, sample_rate_scale=1):
+    def loadvideo_decord(self, video_name,start_ratio,end_ratio, sample_rate_scale=1,rehearsal=False,all_frames=False,index=-1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,video_name)
 
@@ -422,12 +430,20 @@ class ActivitynetDataset(Dataset):
         average_duration = video_length // self.num_segment
         all_index = []
         if average_duration > 0:
-            all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
+            if not rehearsal:
+                all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration, size=self.num_segment))
+            else:
+                all_index += list(start_frame + np.multiply(list(range(self.num_segment)), average_duration))
+                
         elif video_length > self.num_segment:
             all_index += list(start_frame + np.sort(np.random.randint(video_length, size=self.num_segment)))
         else:
             all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
         all_index = list(np.array(all_index)) 
+        if all_frames:
+            all_index = [i for i in range(len(vr)-1)]
+        if len(self.selected_frame)>0:#! update되었단 뜻.
+            all_index = self.selected_frame[index]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
 

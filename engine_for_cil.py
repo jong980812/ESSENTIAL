@@ -341,7 +341,7 @@ def train_one_epoch(model: torch.nn.Module,
     header = header
     print_freq = 10
 
-    for data_iter_step, (samples, targets,vname,sample_task_id) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (samples, targets,vname,sample_task_id,_) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue
@@ -482,7 +482,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
         if len(outputs)==2:
             origin,virtual = outputs[0],outputs[1]
             loss = model.module.cos_loss(origin,target)
-            loss_virtual = model.module.cos_loss(virtual,target)
+            loss_virtual =  model.module.cos_loss(virtual,target) if virtual is not None else None
         else:
             loss = model.module.cos_loss(outputs,target)
     else:
@@ -809,10 +809,14 @@ def save_frame_index(model: torch.nn.Module,
                 #     for c in classes:
                 #         target[target == c] = class_index
             target = target.to(device, non_blocking=True)
-
             # compute output
-
-            video_name = vname[0]+('.mp4' if args.data_set!='UCF101' else '')
+            if args.data_set =='ActivityNet':
+                video_name = vname
+                total_frames = videos.shape[2]
+                start_ratio= round(float(video_name['t_start'][0]) / float(video_name['video_duration'][0]),5)
+                start_frame = int(start_ratio * total_frames) 
+            else:
+                video_name = vname[0]+('.mp4' if args.data_set!='UCF101' else '')
             label = int(target.cpu())
             if task_id!=0:
                 if (video_name in pre_dataset_samples):
@@ -823,8 +827,12 @@ def save_frame_index(model: torch.nn.Module,
                     memory_video_path['samples_task_id'].append(pre_task_id[sample_index])
                     continue
             with torch.cuda.amp.autocast():
-                frame_index,num_frames,logit= model(videos,train=False,task_id=task_id,get_frame = True)
-            selected_index = frame_index.squeeze(0).squeeze(0).cpu().numpy()
+                if args.data_set =='Kinetics-400':
+                    # frame_index = batch[3]
+                    selected_index = np.array([i.item() for i in batch[4]])
+                else:
+                    frame_index,num_frames,logit= model(videos,train=False,task_id=task_id,get_frame = True)
+                    selected_index = frame_index.squeeze(0).squeeze(0).cpu().numpy() #+ (start_frame if args.data_set =='ActivityNet' else 0)
             memory_video_path['dataset_samples'].append(video_name)
             memory_video_path['label_array'].append(label)
             memory_video_path['selected_frame'].append(selected_index.tolist())

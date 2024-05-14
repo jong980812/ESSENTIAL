@@ -469,6 +469,17 @@ class AIM_my(nn.Module):
                 get_frame=False,rehearsal = False,inference = False,frame_making=False):
             
         B, C, T, H, W = x.shape 
+        if get_frame:
+            if self.handcrafted_selection:
+                average_duration = T // 8
+                uniform_index = np.multiply(list(range(8)), average_duration)
+                if self.fs_topk==2:
+                    frame_index = torch.tensor([uniform_index[2],uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                elif self.fs_topk==4:
+                    frame_index = torch.tensor([uniform_index[1],uniform_index[3],uniform_index[5],uniform_index[7]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)  
+                elif self.fs_topk==8:
+                    frame_index = torch.tensor([uniform_index], dtype=torch.int32).unsqueeze(0).unsqueeze(0) 
+            return frame_index,T,None
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if rehearsal:
             with torch.no_grad():
@@ -511,24 +522,16 @@ class AIM_my(nn.Module):
         cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
         if rehearsal:
             return self.rehearsal(cls_origin,cls_virtual,x,frame_token)
-        if get_frame:
-            if self.handcrafted_selection:
-                average_duration = T // 8
-                uniform_index = np.multiply(list(range(8)), average_duration)
-                if self.fs_topk==2:
-                    frame_index = torch.tensor([uniform_index[2],uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                elif self.fs_topk==4:
-                    frame_index = torch.tensor([uniform_index[1],uniform_index[3],uniform_index[5],uniform_index[7]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)  
-            return frame_index,T,None
-        else:
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_origin = decoder(cls_origin,x)
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_virtual = decoder(cls_virtual,frame_token)
+
+
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls_origin = decoder(cls_origin,x)
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls_virtual = decoder(cls_virtual,frame_token)
         cls_len = cls_origin.shape[0]
         cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-        token_loss = F.mse_loss(cls_origin, cls_virtual)
+        token_loss = None#F.mse_loss(cls_origin, cls_virtual)
         cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
         cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         
@@ -581,7 +584,7 @@ class AIM_my(nn.Module):
         cls_len = cls_origin.shape[0]
         cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-        token_loss = F.mse_loss(cls_origin, cls_virtual)
+        token_loss =None# F.mse_loss(cls_origin, cls_virtual)
         cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
         cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         if self.avg_pool is not None:
