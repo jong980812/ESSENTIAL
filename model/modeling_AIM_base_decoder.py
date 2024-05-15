@@ -471,22 +471,22 @@ class AIM_base_decoder(nn.Module):
         x = rearrange(x, 'b t d -> t b d',b=B,t=T);cls = rearrange(cls, 'b t d -> t b d',b=B,t=1)
 
         if get_frame:
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                if i < (self.ba_layers-1):
-                    cls = decoder(cls,x)
-                else:
-                    attention_map,cls = decoder(cls,x,get_frame)
-            if self.fs_density:
-                density = calculate_density(frame_index,T)
-                if density>30.0:
-                    new_frame_index = expand_indices_around_center(frame_index,T, density/30.0)
-                    # print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
-                    frame_index = new_frame_index
-                # elif self.selected_selection:
-                    # pass
-                else:
-                    average_duration = T // 8
-                    frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            #     if i < (self.ba_layers-1):
+            #         cls = decoder(cls,x)
+            #     else:
+            #         attention_map,cls = decoder(cls,x,get_frame)
+            # if self.fs_density:
+            #     density = calculate_density(frame_index,T)
+            #     if density>30.0:
+            #         new_frame_index = expand_indices_around_center(frame_index,T, density/30.0)
+            #         # print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
+            #         frame_index = new_frame_index
+            #     # elif self.selected_selection:
+            #         # pass
+            #     else:
+            #         average_duration = T // 8
+            #         frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
             average_duration = T // 8
             uniform_index = np.multiply(list(range(8)), average_duration)
             if self.handcrafted_selection:
@@ -499,11 +499,11 @@ class AIM_base_decoder(nn.Module):
                 elif self.fs_topk==8:
                     frame_index = torch.tensor([uniform_index], dtype=torch.int32).unsqueeze(0).unsqueeze(0) 
                 return frame_index,T,None
-            elif self.selected_selection:
-                uniform_attention_map = attention_map[:,:,uniform_index]
-                topk_indices = uniform_attention_map.topk(self.fs_topk,-1).indices.squeeze(0).squeeze(0)
-                uniform_index=np.sort((uniform_index[topk_indices.cpu()]))
-                frame_index = torch.tensor(uniform_index,dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            # elif self.selected_selection:
+            #     uniform_attention_map = attention_map[:,:,uniform_index]
+            #     topk_indices = uniform_attention_map.topk(self.fs_topk,-1).indices.squeeze(0).squeeze(0)
+            #     uniform_index=np.sort((uniform_index[topk_indices.cpu()]))
+            #     frame_index = torch.tensor(uniform_index,dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 # selected_indices = torch.randperm(frame_index.size(2))[:4]
                 # 선택된 인덱스를 사용하여 정렬된 텐서에서 값을 선택
                 # frame_index = torch.sort(torch.index_select(frame_index, dim=2, index=selected_indices),dim=2)[0]

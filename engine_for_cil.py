@@ -30,7 +30,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     acc_list = []
     for task_id in range(args.num_tasks):
         # if task_id<1:
-        #     continue
+            # continue
         # SSv2 초반 epoch을 위해 만들어놓았지만, 현재 사용 안함.
         if task_id == 0 and args.data_set == "SSV2":
             warmup_epochs,epochs = args.warmup_epochs,args.epochs
@@ -96,7 +96,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 elif args.model=='AIM_expand':
                     model.module.transformer.make_new_adapter()
                     model.to(args.device)
-                elif args.model=='AIM_custom' or args.model=='AIM_base' or args.model=='AIM_base_decoder':
+                elif args.model=='AIM_custom' or args.model=='AIM_base' or args.model=='AIM_base_decoder' or args.model =='AIM_my':
                     model.module.unfreeze(args.unfreeze_layers_after_base)
                     model.to(args.device)
                 
@@ -220,6 +220,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             # print(unfreeze_list)
             # print('Freeze for rehearsal')
                    # lr scehdule
+            # model.module.unfreeze(args.unfreeze_layers_rehearsal)
             optimizer = create_optimizer(
             args, model_without_ddp, skip_list=args.skip_weight_decay_list,
             get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
@@ -388,13 +389,13 @@ def train_one_epoch(model: torch.nn.Module,
                 frame_making)
         if loss is None:
             loss = torch.tensor(0.).to(device)
+        loss_value = loss.item()
         if token_loss is not None:
             token_value = token_loss.item()
             loss +=token_loss
         if virtual_loss is not None:
             virtual_value = virtual_loss.item()
-            loss +=0.5*virtual_loss
-        loss_value = loss.item()
+            loss +=virtual_loss
 
         # if order_loss is not None:
         #     loss+=order_loss

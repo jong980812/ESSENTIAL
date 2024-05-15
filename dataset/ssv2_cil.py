@@ -206,7 +206,7 @@ class SSVideoClsDataset(Dataset):
                     buffer = self._aug_frame(buffer, args)
   
             
-            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], self.task_id
+            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], self.task_id,{}
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
@@ -219,7 +219,7 @@ class SSVideoClsDataset(Dataset):
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
             if self.rehearsal:
-                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index]
+                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index],{}
             return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':

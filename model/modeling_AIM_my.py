@@ -294,6 +294,7 @@ class AIM_my(nn.Module):
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         # self.transformer_for_cls = Decoder_ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
         self.decoder_cls = nn.Parameter(scale * torch.randn(width))
+        # self.decoder_cls_virtual = nn.Parameter(scale * torch.randn(width))
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
@@ -508,21 +509,21 @@ class AIM_my(nn.Module):
             new_x = torch.zeros(B,8,self.embed_dim).to(x.device)
             for i in range(B):
                 new_x[i] = x[i,[0,1,2,3,4,5,6,7]]
-                #np.sort(np.random.choice(range(8),4,False))
                 # indice = random_indices[i]
                 # x_ = nn.Parameter(x[i, random_indices[i]],required_grad = False)
                 # new_tokens[i, random_indices[i]] = x
         else:
             new_x = x.clone()
-        frame_token = self.decoder_frame_token(new_x,frame_token)
+        frame_token = self.decoder_frame_token(new_x,frame_token)#.transpose(0,1)+self.decoder_temporal_embedding
+        # frame_token = frame_token.transpose(0,1)
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
+        # token_loss = F.mse_loss(x,frame_token)
         cls_origin = rearrange(cls_origin, 'b t d -> t b d',b=B,t=1)
         if inference:
             return self.inference(cls_origin,x)
         cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
         if rehearsal:
             return self.rehearsal(cls_origin,cls_virtual,x,frame_token)
-
 
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
             cls_origin = decoder(cls_origin,x)
@@ -531,7 +532,7 @@ class AIM_my(nn.Module):
         cls_len = cls_origin.shape[0]
         cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-        token_loss = None#F.mse_loss(cls_origin, cls_virtual)
+        token_loss = F.mse_loss(cls_origin, cls_virtual)
         cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
         cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         
@@ -584,7 +585,7 @@ class AIM_my(nn.Module):
         cls_len = cls_origin.shape[0]
         cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-        token_loss =None# F.mse_loss(cls_origin, cls_virtual)
+        token_loss =F.mse_loss(cls_origin, cls_virtual)
         cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
         cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         if self.avg_pool is not None:
