@@ -492,12 +492,8 @@ class AIM_base_decoder(nn.Module):
             if self.handcrafted_selection:
                 average_duration = T // 8
                 uniform_index = np.multiply(list(range(8)), average_duration)
-                if self.fs_topk==2:
-                    frame_index = torch.tensor([uniform_index[2],uniform_index[5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                elif self.fs_topk==4:
-                    frame_index = torch.tensor([uniform_index[1],uniform_index[3],uniform_index[5],uniform_index[7]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)  
-                elif self.fs_topk==8:
-                    frame_index = torch.tensor([uniform_index], dtype=torch.int32).unsqueeze(0).unsqueeze(0) 
+                frame_index = torch.tensor(uniform_index[np.sort(np.random.choice(range(8),self.fs_topk,False))], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+ 
                 return frame_index,T,None
             # elif self.selected_selection:
             #     uniform_attention_map = attention_map[:,:,uniform_index]
