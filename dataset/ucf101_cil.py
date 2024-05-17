@@ -5,6 +5,7 @@ from torchvision import transforms
 from random_erasing import RandomErasing
 import warnings
 from decord import VideoReader, cpu
+from collections import defaultdict
 from torch.utils.data import Dataset
 import video_transforms as video_transforms 
 import volume_transforms as volume_transforms
@@ -72,22 +73,36 @@ class UCFVideoClsDataset(Dataset):
 
         if utils.is_main_process() and mode == 'train' and  args.memory_size>0 and not rehearsal:
             # save video in rehearsal
-            if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
-                args.memory_video_path['dataset_samples'] += self.dataset_samples
-                args.memory_video_path['label_array'] += self.label_array
-            else:
-                need_size = int(args.memory_size / (task_id + 1))
-                m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
-                indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
+            # if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
+            #     args.memory_video_path['dataset_samples'] += self.dataset_samples
+            #     args.memory_video_path['label_array'] += self.label_array
+            # else:
+            #     need_size = int(args.memory_size / (task_id + 1))
+            #     m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
+            #     indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
 
-                selected_indices = random.sample(range(len(self.label_array)), need_size)
-                selected_labels = [self.label_array[i] for i in selected_indices]
-                selected_samples = [self.dataset_samples[i] for i in selected_indices]
-                label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
-                dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
+            #     selected_indices = random.sample(range(len(self.label_array)), need_size)
+            #     selected_labels = [self.label_array[i] for i in selected_indices]
+            #     selected_samples = [self.dataset_samples[i] for i in selected_indices]
+            #     label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
+            #     dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
 
-                args.memory_video_path['dataset_samples'] = dataset_samples
-                args.memory_video_path['label_array'] = label_array
+            #     args.memory_video_path['dataset_samples'] = dataset_samples
+            #     args.memory_video_path['label_array'] = label_array
+            n = args.rehearsal_samples_per_class
+
+            label_to_indices = defaultdict(list)
+            for index, label in enumerate(self.label_array):
+                label_to_indices[label].append(index)
+
+            # 각 label에서 n개씩 랜덤 샘플링하여 샘플 리스트와 레이블 리스트 생성
+            for label, indices in label_to_indices.items():
+                selected_indices = random.sample(indices, min(n, len(indices)))  # n과 해당 label의 샘플 수 중 더 작은 값을 선택
+                for index in selected_indices:
+                    args.memory_video_path['dataset_samples'].append(self.dataset_samples[index])
+                    args.memory_video_path['label_array'].append(label)
+            print(f"Task {task_id} - Num: {len(args.memory_video_path['dataset_samples'])}")
+                    
             with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
                 json.dump(args.memory_video_path, file)
 

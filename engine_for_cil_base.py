@@ -63,6 +63,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 
         #TODO pick best model using validation
         max_accuracy = 0.0
+        # if task_id== 0:
+        #     model.module.transformer.add_task()
+        #     continue
         if task_id > 0:
             # reinit_optimizer
             if loss_scaler is None:
@@ -75,10 +78,26 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 ) 
             else:
 
-                if 'AIM' in args.model:
+                #! Adapter 에서 0번 태스크 이후 작동하는 함수들 따로 지정.
+                if args.model == 'AIM_adapter_v2':
+                    model.module.freeze()                  
+                    model.module.transformer.add_adapters(mode=args.mode)
+                    model.module.transformer.del_adapters()
+                    model.to(args.device)
+                    model_without_ddp = model.module
+                elif args.model == 'AIM_adapter':
+                    model.module.transformer.freeze_adapters()                
+                    model.module.transformer.add_adapters(mode=args.mode)
+                    model.module.transformer.del_adapters()
+                    model.to(args.device)
+                    model_without_ddp = model.module
+                # model.module.transformer_for_cls.initial_adapter()
+                # model.module.transformer.add_task()
+                elif args.model=='AIM_expand':
+                    model.module.transformer.make_new_adapter()
+                    model.to(args.device)
+                elif args.model=='AIM_custom' or args.model=='AIM_base' or args.model=='AIM_base_decoder' or args.model =='AIM_my':
                     model.module.unfreeze(args.unfreeze_layers_after_base)
-                    if args.model=='AIM_final':
-                        model.module.unfreeze_current_associ(task_id)
                     model.to(args.device)
                 
                 optimizer = create_optimizer(
@@ -88,7 +107,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 loss_scaler = NativeScaler()
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
-
+        
+        # if args.inference and (task_id<(args.num_tasks-1)):
+        #     continue
         #!************************ Traininig *************************************
         Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
         checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_start_checkpoint.pth'.format(task_id+1))
@@ -104,11 +125,22 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 break
             if args.joint or args.inference or args.debugging or args.no_training:
                 break
-
+            # if epoch == epochs-5 and task_id>0:
+                # model.module.transformer.set_first(False)
             if args.distributed:
                 data_loader[task_id]['train'].sampler.set_epoch(epoch)   
             header = f'Task {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {epochs}]'
-
+            # if epoch<20:continue
+            if args.set_selection_frame and epoch==30:
+                torch.distributed.barrier()
+                if utils.is_main_process():
+                    data_loader[task_id]['train'].dataset.on_selection_frame(True)
+                    save_frame_index_in_train(model=model,data_loader=data_loader[task_id]['train'],device = device, task_id=task_id, class_mask = None, args = args)
+                    save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask)    
+                torch.distributed.barrier()
+                data_loader[task_id]['train'].dataset.update_train_selected(task_id,args)
+                data_loader[task_id]['train'].dataset.on_selection_frame(False)
+                torch.distributed.barrier()
             train_stats = train_one_epoch(model=model, criterion=criterion, 
                                         data_loader=data_loader[task_id]['train'], optimizer=optimizer, 
                                         device=device, epoch=epoch, max_norm=args.clip_grad, 
@@ -132,6 +164,44 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                         }
                 utils.save_on_master(state_dict, checkpoint_path)
 
+        #!************************ Frame making *************************************
+        if args.frame_making:
+            warmup_epochs,epochs = args.warmup_epochs//2,args.epochs//2
+            print("Use step level LR scheduler!")
+            lr_schedule_values = utils.cosine_scheduler(
+                args.lr, args.min_lr, epochs, num_training_steps_per_epoch,
+                warmup_epochs=warmup_epochs, warmup_steps=args.warmup_steps,
+            )
+            if args.weight_decay_end is None:
+                args.weight_decay_end = args.weight_decay
+            wd_schedule_values = utils.cosine_scheduler(
+            args.weight_decay, args.weight_decay_end, epochs, num_training_steps_per_epoch)
+            model.module.unfreeze(args.unfreeze_layers_frame_making)
+            model.to(args.device)
+            
+            optimizer = create_optimizer(
+            args, model_without_ddp, skip_list=args.skip_weight_decay_list,
+            get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
+            get_layer_scale=args.assigner.get_scale if args.assigner is not None else None)
+            loss_scaler = NativeScaler()
+            n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            print(f'*******Frame_making {task_id+1} params: {n_parameters}*******')  
+            for epoch in range(epochs): 
+                # if epoch == epochs-5 and task_id>0:
+                    # model.module.transformer.set_first(False)
+                if args.distributed:
+                    data_loader[task_id]['train'].sampler.set_epoch(epoch)   
+                header = f'Frame Making {task_id+1}/{args.num_tasks}  Train Epoch: [{epoch} / {epochs}]'
+                _ = train_one_epoch(model=model, criterion=criterion, 
+                                            data_loader=data_loader[task_id]['train'], optimizer=optimizer, 
+                                            device=device, epoch=epoch, max_norm=args.clip_grad, 
+                                            set_training_mode=True, task_id=task_id, class_mask=class_mask, args=args,
+                                            start_steps=epoch * num_training_steps_per_epoch,
+                                            lr_schedule_values=lr_schedule_values, 
+                                            wd_schedule_values=wd_schedule_values,
+                                            num_training_steps_per_epoch=num_training_steps_per_epoch, 
+                                            update_freq=args.update_freq, header= header,loss_scaler=loss_scaler,rehearsal=False,frame_making=True
+                                            )            
         #! Saving CLS TOken*****************************************************************************
         if args.get_frame_index:
             if utils.is_main_process():
@@ -139,17 +209,18 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             torch.distributed.barrier()
             data_loader[task_id]['rehearsal'].dataset.update_rehearsal(task_id,args)
             torch.distributed.barrier()
-        #! *****************************************************************************
-        
-        #? ************************ Rehearsal *************************************
+        elif args.sample_selection:
+            torch.distributed.barrier()
+            data_loader[task_id]['rehearsal'].dataset.update_from_sample_selection(task_id,args)
+            torch.distributed.barrier()
+        #!
+        #!************************ Rehearsal *************************************
         if args.memory_size > 0 and not args.inference:# and task_id > 0:
             # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
             # print(unfreeze_list)
             # print('Freeze for rehearsal')
                    # lr scehdule
             # model.module.unfreeze(args.unfreeze_layers_rehearsal)
-            if args.model =='AIM_final':
-                model.module.freeze_all_associ()
             optimizer = create_optimizer(
             args, model_without_ddp, skip_list=args.skip_weight_decay_list,
             get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
@@ -192,8 +263,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                                             num_training_steps_per_epoch=num_training_steps_per_epoch, 
                                             update_freq=args.update_freq, header=header,loss_scaler=loss_scaler, rehearsal=True
                                             )
-        #? *****************************************************************
-
         if args.no_valid:
             continue
         # continue
@@ -314,24 +383,19 @@ def train_one_epoch(model: torch.nn.Module,
             model, samples, targets, criterion,mask,task_id,args,device)
         else:
             with torch.cuda.amp.autocast():
-                loss,frame_matching,token_matching,virtual_loss, output= train_class_batch(
+                loss,token_loss,virtual_loss,output = train_class_batch(
                 model, samples, targets, criterion,mask,task_id,sample_task_id,args,device,
                 rehearsal,
                 frame_making)
         if loss is None:
             loss = torch.tensor(0.).to(device)
-        loss_value = args.origin_weight*loss.item()
-        if frame_matching is not None:
-            frame_matching_value = args.frame_matching_weight*frame_matching.item()
-            loss +=args.frame_matching_weight*frame_matching
-            
-        if token_matching is not None:
-            token_matching_value = args.token_matching_weight*token_matching.item()
-            loss +=args.token_matching_weight*token_matching
-            
+        loss_value = loss.item()
+        if token_loss is not None:
+            token_value = token_loss.item()
+            loss +=token_loss
         if virtual_loss is not None:
-            virtual_value = args.virtual_weight*virtual_loss.item()
-            loss +=args.virtual_weight*virtual_loss
+            virtual_value = virtual_loss.item()
+            loss +=virtual_loss
 
         # if order_loss is not None:
         #     loss+=order_loss
@@ -365,10 +429,9 @@ def train_one_epoch(model: torch.nn.Module,
             class_acc = None
             
             
-        metric_logger.update(origin_loss=loss_value)
-        metric_logger.update(virtual_loss=virtual_value) if virtual_loss is not None else None
-        metric_logger.update(frame_matching=frame_matching_value) if frame_matching is not None else None 
-        metric_logger.update(token_matching=token_matching_value) if token_matching is not None else None 
+        metric_logger.update(loss=loss_value)
+        metric_logger.update(loss_virtual=virtual_value) if virtual_loss is not None else None
+        metric_logger.update(loss_token=token_value) if token_loss is not None else None 
         # metric_logger.update(order=order_loss.item()) if order_loss is not None else None 
         # metric_logger.update(cls_aug_loss=cls_aug_loss.item()) if cls_aug_loss is not None else None 
         # metric_logger.update(debias=debias_loss.item()) if debias_loss is not None else None
@@ -401,7 +464,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
-    outputs,frame_matching,token_matching = model(samples,train=True,task_id=task_id,sample_task_id=sample_task_id,
+    outputs,token_loss = model(samples,train=True,task_id=task_id,sample_task_id=sample_task_id,
                                 rehearsal = rehearsal,frame_making=frame_making) 
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
@@ -451,7 +514,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
         # loss = loss + order_loss
   
         
-    return loss,(frame_matching),token_matching,(loss_virtual), origin
+    return loss,(token_loss),(loss_virtual), origin
 
 
 def get_loss_scale_for_deepspeed(model):
