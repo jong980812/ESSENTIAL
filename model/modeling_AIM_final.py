@@ -482,14 +482,15 @@ class AIM_final(nn.Module):
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         return x
     def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
-                get_frame=False,rehearsal = False,inference = False,frame_making=False):
+                get_frame=False,rehearsal = False,inference = False,frame_making=False,selected_frame=None):
             
         B, C, T, H, W = x.shape 
         if get_frame:
             if self.handcrafted_selection:
-                average_duration = T // 8
-                uniform_index = np.multiply(list(range(8)), average_duration)
-                frame_index = torch.tensor(uniform_index[np.sort(np.random.choice(range(8),self.fs_topk,False))], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                # average_duration = T // 8
+                # uniform_index = np.multiply(list(range(8)), average_duration)
+                # frame_index = torch.tensor(uniform_index[np.sort(np.random.choice(range(8),self.fs_topk,False))], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor(np.sort(np.random.choice(range(8),self.fs_topk,False)), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
 
             return frame_index,T,None
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
@@ -513,7 +514,8 @@ class AIM_final(nn.Module):
         if inference:
             return self.inference(cls_origin,x)
         elif rehearsal:
-            return self.rehearsal(cls_origin,cls_virtual,x,sample_task_id)
+            x_selected = x[torch.arange(B)[:, None], selected_frame]
+            return self.rehearsal(cls_origin,cls_virtual,x_selected,sample_task_id)
 
         cur_associator = self.associator[task_id]
         frame_prompt = cur_associator(x) # frame_token is b len_p d #? debugging으로 req grad check

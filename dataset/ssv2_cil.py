@@ -219,7 +219,7 @@ class SSVideoClsDataset(Dataset):
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
             if self.rehearsal:
-                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index],{}
+                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index], np.array(self.selected_frame[index]) if len(self.selected_frame)>0 else {}
             return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':
@@ -353,44 +353,27 @@ class SSVideoClsDataset(Dataset):
         # handle temporal segments
         average_duration = len(vr) // self.num_segment
         all_index = []
-        uniform = False if random.random()>uniform_ratio else True
-        if uniform:
-            if average_duration > 0:
-                if not rehearsal:
-                    all_index += list(np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration,
-                                                                                                            size=self.num_segment))
-                else:
-                    all_index += list(np.multiply(list(range(self.num_segment)), average_duration))
-            elif len(vr) > self.num_segment:
-                all_index += list(np.sort(np.random.randint(len(vr), size=self.num_segment)))
+        if average_duration > 0:
+            if not rehearsal:
+                all_index += list(np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration,
+                                                                                                        size=self.num_segment))
             else:
-                all_index += list(np.zeros((self.num_segment,)))
-            all_index = list(np.array(all_index))
+                all_index += list(np.multiply(list(range(self.num_segment)), average_duration))
+        elif len(vr) > self.num_segment:
+            all_index += list(np.sort(np.random.randint(len(vr), size=self.num_segment)))
         else:
-            converted_len = int(self.num_segment * self.frame_sample_rate)
-            seg_len = len(vr)
-            # for i in range(self.num_segment):
-            if seg_len <= converted_len:
-                index_ = np.linspace(0, seg_len, num=seg_len // self.frame_sample_rate)
-                index_ = np.concatenate((index_, np.ones(self.num_segment - seg_len // self.frame_sample_rate) * seg_len))
-                index_ = np.clip(index_, 0, seg_len - 1).astype(np.int64)
-            else:
-                if not rehearsal:
-                    end_idx = np.random.randint(converted_len, seg_len)
-                else:
-                    points = np.linspace(converted_len, seg_len, 4, endpoint=True)
-                    end_idx = int(np.random.choice(points))
-                str_idx = end_idx - converted_len
-                index_ = np.linspace(str_idx, end_idx, num=self.num_segment)
-                index_ = np.clip(index_, str_idx, end_idx - 1).astype(np.int64)
-            # index = index + i*seg_len
-            all_index.extend(list(index_))     
+            all_index += list(np.zeros((self.num_segment,)))
+        all_index = list(np.array(all_index))
+  
         
         
         if all_frames:
             all_index = [i for i in range(len(vr))] 
-        if len(self.selected_frame)>0:#! update되었단 뜻.
-            all_index = self.selected_frame[index]
+        # if len(self.selected_frame)>0:#! update되었단 뜻.
+        #     # all_index = self.selected_frame[index]
+        #     vr.seek(0)
+        #     buffer = vr.get_batch(all_index).asnumpy()
+        #     return buffer,self.selected_frame[index]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
         return buffer

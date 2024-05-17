@@ -78,6 +78,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 if 'AIM' in args.model:
                     model.module.unfreeze(args.unfreeze_layers_after_base)
                     if args.model=='AIM_final':
+                        model.module.freeze_all_associ()
                         model.module.unfreeze_current_associ(task_id)
                     model.to(args.device)
                 
@@ -273,7 +274,8 @@ def train_one_epoch(model: torch.nn.Module,
     header = header
     print_freq = 10
 
-    for data_iter_step, (samples, targets,vname,sample_task_id,_) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (samples, targets,vname,sample_task_id,selected_frame) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+        indices = selected_frame.numpy()
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue
@@ -317,7 +319,7 @@ def train_one_epoch(model: torch.nn.Module,
                 loss,frame_matching,token_matching,virtual_loss, output= train_class_batch(
                 model, samples, targets, criterion,mask,task_id,sample_task_id,args,device,
                 rehearsal,
-                frame_making)
+                frame_making,indices)
         if loss is None:
             loss = torch.tensor(0.).to(device)
         loss_value = args.origin_weight*loss.item()
@@ -396,13 +398,13 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal,frame_making):
+def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal,frame_making,selected_frame):
     
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
     outputs,frame_matching,token_matching = model(samples,train=True,task_id=task_id,sample_task_id=sample_task_id,
-                                rehearsal = rehearsal,frame_making=frame_making) 
+                                rehearsal = rehearsal,frame_making=frame_making,selected_frame=selected_frame) 
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)
 
