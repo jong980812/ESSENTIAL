@@ -312,7 +312,7 @@ class AIM_final(nn.Module):
         self.n_token_rehearsal = args.n_token_rehearsal
         self.handcrafted_selection = args.handcrafted_selection
         self.selected_selection = args.selected_selection
-
+        self.data_set = args.data_set
         if self.replay_token:
             self.len_prompt = args.len_prompt
             self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=i) for i in range(args.num_tasks)])
@@ -383,6 +383,12 @@ class AIM_final(nn.Module):
         for param in cur_asso.parameters():
             param.requires_grad = True
         return
+    def update_from_previous_associ(self,task_id = -1):
+        cur_asso = self.associator[task_id]
+        pre_asso = self.associator[task_id-1]
+        pre_weight = pre_asso.state_dict()
+        print(cur_asso.load_state_dict(pre_weight,strict=True))
+        print(f'Associator ({cur_asso.task_id}) is updated from previous associator')
     def init_weights(self, pretrained=None):
         def _init_weights(m):
             if isinstance(m, nn.Linear):
@@ -516,10 +522,13 @@ class AIM_final(nn.Module):
         elif rehearsal:
             x_selected = x[torch.arange(B)[:, None], selected_frame]
             return self.rehearsal(cls_origin,cls_virtual,x_selected,sample_task_id)
-
+        
+        new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
+        for i in range(B):
+            new_x[i] = x[i,np.sort(np.random.choice(range(8),self.fs_topk,False))]
         cur_associator = self.associator[task_id]
-        frame_prompt = cur_associator(x) # frame_token is b len_p d #? debugging으로 req grad check
-
+        frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
+        
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
         frame_matching_loss = F.mse_loss(x,frame_prompt) if self.frame_matching else None
@@ -554,7 +563,7 @@ class AIM_final(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = self.head(cls_virtual)
+            cls_virtual = self.head(cls_virtual) if self.data_set !='SSV2' else None
         return (cls_origin,cls_virtual),frame_matching_loss,token_matching_loss
     
     

@@ -193,7 +193,7 @@ class UCFVideoClsDataset(Dataset):
                     buffer = self.loadvideo_decord(sample)
             buffer = self.data_transform(buffer)
             if self.rehearsal:
-                return buffer, self.label_array[index], sample,self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index], {}
+                return buffer, self.label_array[index], sample,self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index], np.array(self.selected_frame[index]) if len(self.selected_frame)>0 else {}
             return buffer, self.label_array[index], sample
 
         elif self.mode == 'test':
@@ -341,8 +341,8 @@ class UCFVideoClsDataset(Dataset):
         all_index = list(np.array(all_index)) 
         if all_frames:
             all_index = [i for i in range(len(vr))]
-        if len(self.selected_frame)>0:#! update되었단 뜻.
-            all_index = self.selected_frame[index]
+        # if len(self.selected_frame)>0:#! update되었단 뜻.
+        #     all_index = self.selected_frame[index]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
         return buffer

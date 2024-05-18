@@ -79,6 +79,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.unfreeze(args.unfreeze_layers_after_base)
                     if args.model=='AIM_final':
                         model.module.freeze_all_associ()
+                        model.module.update_from_previous_associ(task_id)
                         model.module.unfreeze_current_associ(task_id)
                     model.to(args.device)
                 
@@ -89,7 +90,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 loss_scaler = NativeScaler()
         n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f'*******Task{task_id+1} params: {n_parameters}*******')
-
+            
         #!************************ Traininig *************************************
         Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)
         checkpoint_path = os.path.join(args.output_dir, 'checkpoint/task{}_epoch_start_checkpoint.pth'.format(task_id+1))
@@ -101,6 +102,12 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
         utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
+            # if args.task2_weight is not None and task_id==1:
+            #     check = torch.load(args.ssv2_first_finetune,'cpu')['model']
+            #     print(model.module.load_state_dict(check))
+            #     print('*******task2_weight is applied***********')
+            #     del check
+            #     break
             if args.ssv2_first_finetune is not None and (task_id<1):
                 break
             if args.joint or args.inference or args.debugging or args.no_training:
@@ -275,7 +282,7 @@ def train_one_epoch(model: torch.nn.Module,
     print_freq = 10
 
     for data_iter_step, (samples, targets,vname,sample_task_id,selected_frame) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
-        indices = selected_frame.numpy()
+        indices = selected_frame if isinstance(selected_frame,dict) else selected_frame.numpy() 
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
             continue
