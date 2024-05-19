@@ -142,7 +142,7 @@ class Transformer(nn.Module):
                             m2.weight.requires_grad_(True)
                             m2.bias.requires_grad_(True)
 class Associator(nn.Module):
-    def __init__(self, temp_mode:str,d_model: int, attn_mask: torch.Tensor = None, num_frames=8, drop_path=0.2,fs_topk=8,len_prompt=8,task_id=-1):
+    def __init__(self, temp_mode:str,d_model: int, attn_mask: torch.Tensor = None, num_frames=8, drop_path=0.2,fs_topk=8,len_prompt=8,task_id=-1,mode= 'cross'):
         super().__init__()
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.fs_topk = fs_topk
@@ -150,27 +150,52 @@ class Associator(nn.Module):
         n_head = 12
         # self.temporal_encoding = nn.Parameter(torch.zeros(1, num_frames, d_model))
         self.len_prompt = len_prompt
+        self.mode = mode
         self.prompt = nn.Parameter(torch.FloatTensor(len_prompt, d_model), requires_grad=True)
         nn.init.uniform_(self.prompt)
-        self.attn = nn.MultiheadAttention(d_model, n_head)
-        self.attn_mask = attn_mask
-        self.ln_1 = LayerNorm(d_model)
-        self.ln_2 = LayerNorm(d_model)
-        self.ln_tokens = LayerNorm(d_model)
-        self.mlp = nn.Sequential(OrderedDict([
-            ("c_fc", nn.Linear(d_model, d_model * 4)),
-            ("gelu", QuickGELU()),
-            ("c_proj", nn.Linear(d_model * 4, d_model))
-            ]))
+        if mode == 'cross' or mode=='self':
+            self.attn = nn.MultiheadAttention(d_model, n_head)
+            self.attn_mask = attn_mask
+            self.ln_1 = LayerNorm(d_model)
+            self.ln_2 = LayerNorm(d_model)
+            self.ln_tokens = LayerNorm(d_model)
+            self.mlp = nn.Sequential(OrderedDict([
+                ("c_fc", nn.Linear(d_model, d_model * 4)),
+                ("gelu", QuickGELU()),
+                ("c_proj", nn.Linear(d_model * 4, d_model))
+                ]))
+        elif mode =='3_layer_mlp':
+            self.mlp = nn.Sequential(OrderedDict([
+                ("c_fc1", nn.Linear(d_model, d_model)),
+                ("gelu", QuickGELU()),
+                ("c_fc2", nn.Linear(d_model , d_model)),
+                ("gelu", QuickGELU()),
+                ("c_fc3", nn.Linear(d_model,d_model))
+                ]))
+        elif mode =='general':
+            pass
         self.task_id = task_id
     def forward(self, x):
         B,kv_T,D = x.shape
         frame_token = self.prompt.expand(B,-1,-1)
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
         frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
-        ln_tokens = self.ln_tokens(frame_token)#!T,b,d
-        frame_token = frame_token + self.drop_path(self.attention(ln_tokens,self.ln_1(x)))
-        frame_token = frame_token + self.drop_path(self.mlp(self.ln_2(frame_token)))
+        if self.mode=='general':
+            pass
+        elif self.mode =='cross':
+            ln_tokens = self.ln_tokens(frame_token)#!T,b,d
+            frame_token = frame_token + self.drop_path(self.attention(ln_tokens,self.ln_1(x)))
+            frame_token = frame_token + self.drop_path(self.mlp(self.ln_2(frame_token)))
+        elif self.mode =='self':
+            ln_tokens = self.ln_tokens(frame_token)#!T,b,d
+            ln_x = self.ln_1(x)
+            new_x = torch.cat([ln_x,ln_tokens],dim=0)# (kv_T+len prompt, B, D)
+            new_x = new_x+self.drop_path(self.attention(new_x,new_x))
+            new_x = new_x + self.drop_path(self.mlp(self.ln2(new_x)))
+            frame_token = new_x[kv_T:,:,:]
+        elif self.mode =='3_layer_mlp':
+            x = self.mlp(x)
+            frame_token = frame_token+x
         frame_token = rearrange(frame_token, 't b d -> b t d',b=B,t=self.len_prompt)
         return frame_token
     def freeze(self,block_list=None):
@@ -316,7 +341,7 @@ class AIM_final(nn.Module):
         self.data_set = args.data_set
         if self.replay_token:
             self.len_prompt = args.len_prompt
-            self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=i) for i in range(args.num_tasks)])
+            self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=i,mode=args.prompt_mode) for i in range(args.num_tasks)])
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
@@ -331,6 +356,7 @@ class AIM_final(nn.Module):
         self.token_matching = args.token_matching
         
         #!!
+        
 
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         # self.head_virtual = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -564,7 +590,7 @@ class AIM_final(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = None#self.head(cls_virtual) if self.data_set !='SSV2' else None
+            cls_virtual = None#self.head(cls_virtual)# if self.data_set !='SSV2' else None
         return (cls_origin,cls_virtual),frame_matching_loss,token_matching_loss
     
     
