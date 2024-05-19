@@ -175,20 +175,22 @@ class Associator(nn.Module):
                 ("c_fc3", nn.Linear(d_model,d_model))
                 ]))
         elif mode =='general':
-            self.mlp = nn.Sequential(OrderedDict([
-                ("c_fc1", nn.Linear(d_model, d_model)),
-                ("gelu", QuickGELU()),
-                ("c_fc2", nn.Linear(d_model , d_model)),
-                ("gelu", QuickGELU()),
-                ("c_fc3", nn.Linear(d_model,d_model))
-                ]))
+            pass
+            # self.mlp = nn.Sequential(OrderedDict([
+            #     ("c_fc1", nn.Linear(d_model, d_model)),
+            #     ("gelu", QuickGELU()),
+            #     ("c_fc2", nn.Linear(d_model , d_model)),
+            #     ("gelu", QuickGELU()),
+            #     ("c_fc3", nn.Linear(d_model,d_model))
+            #     ]))
     def forward(self, x):
         B,kv_T,D = x.shape
         frame_token = self.prompt.expand(B,-1,-1)
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
         frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
         if self.mode=='general':
-            frame_token= frame_token + self.mlp(frame_token)
+            pass
+            # frame_token= frame_token + self.mlp(frame_token)
         elif self.mode =='cross':
             ln_tokens = self.ln_tokens(frame_token)#!T,b,d
             frame_token = frame_token + self.drop_path(self.attention(ln_tokens,self.ln_1(x)))
@@ -413,10 +415,22 @@ class AIM_final(nn.Module):
                     param.requires_grad = False
         print(f'unfreeze_list:{unfreeze_list}')
     def freeze_all_associ(self):
-        for asso in self.associator:
-            print(f'Associator ({asso.task_id}) is all freezed')
-            for param in asso.parameters():
-                param.requires_grad = False
+        if self.memory_mode=='task':
+            for asso in self.associator:
+                print(f'Associator ({asso.task_id}) is all freezed')
+                for param in asso.parameters():
+                    param.requires_grad = False
+        elif self.memory_mode=='class':
+            for asso in self.associator:
+                print(f'Associator ({asso.class_id}) is all freezed')
+                for param in asso.parameters():
+                    param.requires_grad = False
+        elif self.memory_mode=='global':
+            for asso in self.associator:
+                print(f'Associator global ({asso.task_id}) is all freezed')
+                for param in asso.parameters():
+                    param.requires_grad = False
+        
         return
     def unfreeze_current_associ(self,task_id = -1):
         if self.memory_mode=='task':
