@@ -173,7 +173,13 @@ class Associator(nn.Module):
                 ("c_fc3", nn.Linear(d_model,d_model))
                 ]))
         elif mode =='general':
-            pass
+            self.mlp = nn.Sequential(OrderedDict([
+                ("c_fc1", nn.Linear(d_model, d_model)),
+                ("gelu", QuickGELU()),
+                ("c_fc2", nn.Linear(d_model , d_model)),
+                ("gelu", QuickGELU()),
+                ("c_fc3", nn.Linear(d_model,d_model))
+                ]))
         self.task_id = task_id
     def forward(self, x):
         B,kv_T,D = x.shape
@@ -181,7 +187,7 @@ class Associator(nn.Module):
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
         frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
         if self.mode=='general':
-            pass
+            frame_token= frame_token + self.mlp(frame_token)
         elif self.mode =='cross':
             ln_tokens = self.ln_tokens(frame_token)#!T,b,d
             frame_token = frame_token + self.drop_path(self.attention(ln_tokens,self.ln_1(x)))
