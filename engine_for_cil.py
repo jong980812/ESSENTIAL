@@ -410,7 +410,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
     # if args.each_head:
     # first_class = mask[0]
     # if args.order:
-    outputs,frame_matching,token_matching = model(samples,train=True,task_id=task_id,sample_task_id=sample_task_id,
+    outputs,frame_matching,token_matching = model(samples,train=True,class_id=target.item(),task_id=task_id,sample_task_id=sample_task_id,
                                 rehearsal = rehearsal,frame_making=frame_making,selected_frame=selected_frame) 
     # else:
     #     outputs,_= model(samples,train=True,task_id=task_id)

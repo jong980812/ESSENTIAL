@@ -142,10 +142,12 @@ class Transformer(nn.Module):
                             m2.weight.requires_grad_(True)
                             m2.bias.requires_grad_(True)
 class Associator(nn.Module):
-    def __init__(self, temp_mode:str,d_model: int, attn_mask: torch.Tensor = None, num_frames=8, drop_path=0.2,fs_topk=8,len_prompt=8,task_id=-1,mode= 'cross'):
+    def __init__(self, temp_mode:str,d_model: int, attn_mask: torch.Tensor = None, num_frames=8, drop_path=0.2,fs_topk=8,len_prompt=8,class_id=-1,task_id=-1,mode= 'cross'):
         super().__init__()
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.fs_topk = fs_topk
+        self.task_id = task_id #! global is set -1
+        self.class_id = class_id
         d_model = 768
         n_head = 12
         # self.temporal_encoding = nn.Parameter(torch.zeros(1, num_frames, d_model))
@@ -180,7 +182,6 @@ class Associator(nn.Module):
                 ("gelu", QuickGELU()),
                 ("c_fc3", nn.Linear(d_model,d_model))
                 ]))
-        self.task_id = task_id
     def forward(self, x):
         B,kv_T,D = x.shape
         frame_token = self.prompt.expand(B,-1,-1)
@@ -331,6 +332,7 @@ class AIM_final(nn.Module):
         self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.use_aim_weight = args.use_aim_weight
         self.replay_token = args.replay_token
+        self.memory_mode = args.memory_mode
         if args.use_aim_weight:
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.order = args.order
@@ -347,7 +349,12 @@ class AIM_final(nn.Module):
         self.data_set = args.data_set
         if self.replay_token:
             self.len_prompt = args.len_prompt
-            self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=i,mode=args.prompt_mode) for i in range(args.num_tasks)])
+            if self.memory_mode=='global':
+                self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=-1,mode=args.prompt_mode)])
+            elif self.memory_mode=='class':
+                self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,class_id = i,task_id=-1,mode=args.prompt_mode)for i in range(args.nb_classes)])
+            elif self.memory_mode=='task':
+                self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=i,mode=args.prompt_mode) for i in range(args.num_tasks)])
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
@@ -360,7 +367,8 @@ class AIM_final(nn.Module):
         self.cos = args.cos
         self.frame_matching = args.frame_matching
         self.token_matching = args.token_matching
-        
+        self.class_mask = class_mask
+                
         #!!
         
 
@@ -411,10 +419,23 @@ class AIM_final(nn.Module):
                 param.requires_grad = False
         return
     def unfreeze_current_associ(self,task_id = -1):
-        cur_asso = self.associator[task_id]
-        print(f'Associator ({cur_asso.task_id}) is activated')
-        for param in cur_asso.parameters():
-            param.requires_grad = True
+        if self.memory_mode=='task':
+            cur_asso = self.associator[task_id]
+            print(f'Associator ({cur_asso.task_id}) is activated')
+            for param in cur_asso.parameters():
+                param.requires_grad = True
+        elif self.memory_mode =='class':
+            cur_classes = self.class_mask[task_id]
+            for cls in cur_classes:
+                cur_asso = self.associator[cls]
+                print(f'Associator class ({cur_asso.class_id}) is activated')
+                for param in cur_asso.parameters():
+                    param.requires_grad = True
+        elif self.memory_mode =='global':
+            cur_asso = self.associator[0]
+            print(f'Associator (global) is activated')
+            for param in cur_asso.parameters():
+                param.requires_grad = True
         return
     def update_from_previous_associ(self,task_id = -1):
         cur_asso = self.associator[task_id]
@@ -520,7 +541,7 @@ class AIM_final(nn.Module):
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         return x
-    def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
+    def forward(self, x: torch.Tensor, train=False,class_id=-1,task_id =-1,sample_task_id=-1,
                 get_frame=False,rehearsal = False,inference = False,frame_making=False,selected_frame=None):
             
         B, C, T, H, W = x.shape 
@@ -551,13 +572,25 @@ class AIM_final(nn.Module):
             return self.inference(cls_origin,x)
         elif rehearsal:
             x_selected = x[torch.arange(B)[:, None], selected_frame]
-            return self.rehearsal(cls_origin,cls_virtual,x_selected,sample_task_id)
+            return self.rehearsal(cls_origin,cls_virtual,x_selected,sample_task_id,class_id)
         
         new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
         for i in range(B):
             new_x[i] = x[i,np.sort(np.random.choice(range(8),self.fs_topk,False))]
-        cur_associator = self.associator[task_id]
-        frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
+        if self.memory_mode=='task':
+            cur_associator = self.associator[task_id]
+            frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
+        elif self.memory_mode =='global':
+            cur_associator = self.associator[0]
+            frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
+        elif self.memory_mode =='class':
+            batch = list()
+            for i in range(B):
+                cur_associator=self.associator[class_id[i].item()]
+                each_x = x[i:i+1,:,:]# 1, t, d
+                frame_token = cur_associator(each_x) # frame_token is (1,len_p,d) 
+                batch.append(frame_token)
+            frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
         
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
@@ -625,7 +658,7 @@ class AIM_final(nn.Module):
     
     
     
-    def rehearsal(self,cls_origin,cls_virtual,x,sample_task_id):
+    def rehearsal(self,cls_origin,cls_virtual,x,sample_task_id,class_id):
         '''
         cls shape -> t, b, d
         x -> b,t,d
@@ -633,14 +666,26 @@ class AIM_final(nn.Module):
         B,kv_T,D = x.shape
         assert kv_T == self.fs_topk, "kv_T and self.fs_topk must be equal"
         #?Making bath for rehearsal
-        batch = list()
-        for i in range(B):
-            cur_associator=self.associator[sample_task_id[i].item()]
-            each_x = x[i:i+1,:,:]# 1, t, d
-            frame_token = cur_associator(each_x) # frame_token is (1,len_p,d) 
-            batch.append(frame_token)
-        frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
-        
+        if self.memory_mode=='task':
+            batch = list()
+            for i in range(B):
+                cur_associator=self.associator[sample_task_id[i].item()]
+                each_x = x[i:i+1,:,:]# 1, t, d
+                frame_token = cur_associator(each_x) # frame_token is (1,len_p,d) 
+                batch.append(frame_token)
+            frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
+        elif self.memory_mode =='class':
+            batch = list()
+            for i in range(B):
+                cur_associator=self.associator[class_id[i].item()]
+                each_x = x[i:i+1,:,:]# 1, t, d
+                frame_token = cur_associator(each_x) # frame_token is (1,len_p,d) 
+                batch.append(frame_token)
+            frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
+        elif self.memory_mode =='global':
+            cur_associator = self.associator[0]
+            frame_prompt = cur_associator(x) # frame_token is b len_p d #? debugging으로 req grad check
+    
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
         frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
         
