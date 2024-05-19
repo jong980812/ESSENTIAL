@@ -191,7 +191,7 @@ class Associator(nn.Module):
             ln_x = self.ln_1(x)
             new_x = torch.cat([ln_x,ln_tokens],dim=0)# (kv_T+len prompt, B, D)
             new_x = new_x+self.drop_path(self.attention(new_x,new_x))
-            new_x = new_x + self.drop_path(self.mlp(self.ln2(new_x)))
+            new_x = new_x + self.drop_path(self.mlp(self.ln_2(new_x)))
             frame_token = new_x[kv_T:,:,:]
         elif self.mode =='3_layer_mlp':
             x = self.mlp(x)
