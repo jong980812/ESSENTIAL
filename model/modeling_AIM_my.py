@@ -8,6 +8,7 @@ from torch import nn
 import clip
 from einops import rearrange
 
+np.random.seed(0)
 
 class Adapter(nn.Module):
     def __init__(self, D_features, dim_mlp=192, act_layer=nn.GELU, skip_connect=True):

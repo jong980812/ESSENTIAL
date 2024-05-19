@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 import clip
 from einops import rearrange
+np.random.seed(0)
 
 
 class Adapter(nn.Module):
@@ -398,11 +399,7 @@ class AIM_base_decoder(nn.Module):
     @torch.jit.ignore
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
-
-    def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
-                get_frame=False,rehearsal = False,inference = False,frame_making=False):
-            
-        # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
+    def get_cls_tokens(self,x):
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
             x = x.unsqueeze(2)
         B, C, T, H, W = x.shape 
@@ -416,9 +413,7 @@ class AIM_base_decoder(nn.Module):
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
         if self.use_aim_weight:#! AIM은 temporal embedding들어옴.
             temporal_embedding=self.temporal_embedding 
-            if self.cls_aug:
-                temporal_embedding = torch.cat([temporal_embedding,temporal_embedding],1)
-            elif temporal_embedding.shape[1]!=(T):
+            if temporal_embedding.shape[1]!=(T):
                 temporal_embedding = F.interpolate(
                     temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
                 ).squeeze(1)
@@ -434,33 +429,32 @@ class AIM_base_decoder(nn.Module):
         x = self.ln_post(x)
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
-        
-        '''
-        x_norm = x / x.norm(dim=1, keepdim=True)
-        
-         코사인 유사도 맵 계산
-        cosine_similarity_map = torch.matmul(x_norm, x_norm.transpose(0, 1))
-        '''
-        # 
-        # if T<8:
-        #     x = torch.repeat_interleave(x, 8//T, dim=1)
-        #     T=8
+        return x
+    def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
+                get_frame=False,rehearsal = False,inference = False,frame_making=False,selected_frame=None):
+            
+        # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
+        if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
+            x = x.unsqueeze(2)
+        B, C, T, H, W = x.shape
+        if get_frame:
+            if self.handcrafted_selection:
+                average_duration = T // 8
+                frame_index = torch.tensor(np.sort(np.random.choice(range(8),self.fs_topk,False)), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            return frame_index,T,None
+        if rehearsal:
+            with torch.no_grad():
+                x = self.get_cls_tokens(x)
+        else:
+            x = self.get_cls_tokens(x)
+    
         decoder_temporal_embedding=self.decoder_temporal_embedding 
         if decoder_temporal_embedding.shape[1]!=(T):
             decoder_temporal_embedding = F.interpolate(
                 decoder_temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
             ).squeeze(1)
-        # #!
-        # if get_frame:
-        #     decoder_temporal_embedding = F.interpolate(
-        #         decoder_temporal_embedding.unsqueeze(1), size=(T+1,768), mode='bilinear', align_corners=False
-        #     ).squeeze(1)
-    
-        # #!
-        '''
-        x는 원래 CLIP으로 부터 나온 CLS 토큰들
-        cls는 decoder를 위한 새로운 CLS token. 
-        '''
+
+
         cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         # cls_and_x = torch.cat([cls,x],1)# B, T+1, D
         # cls_and_x = cls_and_x + decoder_temporal_embedding
@@ -468,48 +462,14 @@ class AIM_base_decoder(nn.Module):
         # cls,x = cls_and_x[0,:,:],cls_and_x[1:,:,:]
         # cls = cls.unsqueeze(0)
         x = x + decoder_temporal_embedding
+        if rehearsal:
+            x = x[torch.arange(B)[:, None], selected_frame]
+            T = self.fs_topk
         x = rearrange(x, 'b t d -> t b d',b=B,t=T);cls = rearrange(cls, 'b t d -> t b d',b=B,t=1)
 
-        if get_frame:
-            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
-            #     if i < (self.ba_layers-1):
-            #         cls = decoder(cls,x)
-            #     else:
-            #         attention_map,cls = decoder(cls,x,get_frame)
-            # if self.fs_density:
-            #     density = calculate_density(frame_index,T)
-            #     if density>30.0:
-            #         new_frame_index = expand_indices_around_center(frame_index,T, density/30.0)
-            #         # print(f'Index: {frame_index},New Index : {new_frame_index}, T:{T},Den:{density}')
-            #         frame_index = new_frame_index
-            #     # elif self.selected_selection:
-            #         # pass
-            #     else:
-            #         average_duration = T // 8
-            #         frame_index = torch.tensor(list(np.multiply(list(range(8)), average_duration)),dtype=torch.int32).unsqueeze(0).unsqueeze(0)#torch.tensor([int(i) for i in range(8)],dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-            average_duration = T // 8
-            uniform_index = np.multiply(list(range(8)), average_duration)
-            if self.handcrafted_selection:
-                average_duration = T // 8
-                uniform_index = np.multiply(list(range(8)), average_duration)
-                frame_index = torch.tensor(uniform_index[np.sort(np.random.choice(range(8),self.fs_topk,False))], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
- 
-                return frame_index,T,None
-            # elif self.selected_selection:
-            #     uniform_attention_map = attention_map[:,:,uniform_index]
-            #     topk_indices = uniform_attention_map.topk(self.fs_topk,-1).indices.squeeze(0).squeeze(0)
-            #     uniform_index=np.sort((uniform_index[topk_indices.cpu()]))
-            #     frame_index = torch.tensor(uniform_index,dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # selected_indices = torch.randperm(frame_index.size(2))[:4]
-                # 선택된 인덱스를 사용하여 정렬된 텐서에서 값을 선택
-                # frame_index = torch.sort(torch.index_select(frame_index, dim=2, index=selected_indices),dim=2)[0]
-                # frame_index = torch.tensor([frame_index[0,0,2], frame_index[0,0,5]], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
 
-
-            return frame_index,T,None
-        else:
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls = decoder(cls,x)
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls = decoder(cls,x)
             
         cls_len = cls.shape[0]
         cls = rearrange(cls, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
@@ -533,9 +493,8 @@ class AIM_base_decoder(nn.Module):
         else:
         # [N, in_channels]
             cls = self.head(cls)
-        x_final = (self.temp_head(x_final)) if self.order else None
         return (cls,None),None
-    
+
 def adjust_norm(input_tensor, ref_tensor):
     # input_tensor와 ref_tensor의 norm 계산
     input_norm = input_tensor.norm(p=2, dim=0, keepdim=True)

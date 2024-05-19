@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 import clip
 from einops import rearrange
-
+np.random.seed(0)
 
 class Adapter(nn.Module):
     def __init__(self, D_features, dim_mlp=192, act_layer=nn.GELU, skip_connect=True):
@@ -216,18 +216,18 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
         self.temp_mode = temp_mode
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.fs_topk = fs_topk
-        if self.temp_mode=='transformer':
+        if self.temp_mode=='self':
             d_model = 768
             n_head = 12
             self.attn = nn.MultiheadAttention(d_model, n_head)
-            self.mlp = nn.Sequential(OrderedDict([
-                ("c_fc", nn.Linear(d_model, d_model * 4)),
-                ("gelu", QuickGELU()),
-                ("c_proj", nn.Linear(d_model * 4, d_model))
-            ]))
+            # self.mlp = nn.Sequential(OrderedDict([
+            #     ("c_fc", nn.Linear(d_model, d_model * 4)),
+            #     ("gelu", QuickGELU()),
+            #     ("c_proj", nn.Linear(d_model * 4, d_model))
+            # ]))
             self.ln_1 = LayerNorm(d_model)
             self.ln_2 = LayerNorm(d_model)
-            self.ln_cls = LayerNorm(d_model)
+            # self.ln_cls = LayerNorm(d_model)
             self.attn_mask = attn_mask
         elif self.temp_mode=='attention':
             d_model = 768
@@ -257,16 +257,17 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
         self.attn_mask = self.attn_mask.to(dtype=q.dtype, device=q.device) if self.attn_mask is not None else None
         return self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[0] if not need_weights else self.attn(q, kv, kv, need_weights=need_weights, attn_mask=self.attn_mask)[1]
     def forward(self, cls: torch.Tensor,x: torch.Tensor,get_frame=False):
-        #입력 cls_token B,T,D
+        #입력 cls_token 1,B,D
         B = x.shape[1]# X: T,B,D
         # cls = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
-        if self.temp_mode=='transformer':
-            ln_cls = self.ln_cls(cls)
-            ln1 = self.ln_1(x)
+        if self.temp_mode=='self':
+            new_x = torch.cat([cls,x],dim=0) # T+1, B,D
+            ln1 = self.ln_1(new_x)
             if get_frame:
                 return self.attention(ln_cls,ln1,need_weights=True)
-            cls = cls + self.drop_path(self.attention(ln_cls,ln1))
-            cls = cls + self.drop_path(self.mlp(self.ln_2(cls)))
+            new_x = new_x + self.drop_path(self.attention(ln1,ln1))
+            cls = new_x[0:1,:,:]
+            # cls = cls + self.drop_path(self.mlp(self.ln_2(cls)))
         elif self.temp_mode=='attention':
             ln_cls = self.ln_cls(cls)
             ln1 = self.ln_1(x)
@@ -563,7 +564,7 @@ class AIM_final(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = self.head(cls_virtual) if self.data_set !='SSV2' else None
+            cls_virtual = None#self.head(cls_virtual) if self.data_set !='SSV2' else None
         return (cls_origin,cls_virtual),frame_matching_loss,token_matching_loss
     
     
