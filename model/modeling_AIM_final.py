@@ -520,9 +520,6 @@ class AIM_final(nn.Module):
         B, C, T, H, W = x.shape 
         if get_frame:
             if self.handcrafted_selection:
-                # average_duration = T // 8
-                # uniform_index = np.multiply(list(range(8)), average_duration)
-                # frame_index = torch.tensor(uniform_index[np.sort(np.random.choice(range(8),self.fs_topk,False))], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 frame_index = torch.tensor(np.sort(np.random.choice(range(8),self.fs_topk,False)), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
 
             return frame_index,T,None
