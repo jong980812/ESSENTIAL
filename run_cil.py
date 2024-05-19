@@ -305,6 +305,7 @@ def get_args_cil():
     parser.add_argument('--token_matching', default=False, action='store_true')
     parser.add_argument('--task2_weight', default=None, type=str)
     parser.add_argument('--prompt_mode', default='cross', type=str)
+    parser.add_argument('--memory_mode', default='task', type=str)
 
 
 
