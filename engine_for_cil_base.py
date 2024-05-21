@@ -813,10 +813,13 @@ def save_frame_index(model: torch.nn.Module,
             target = target.to(device, non_blocking=True)
             # compute output
             if args.data_set =='ActivityNet':
-                video_name = vname
-                total_frames = videos.shape[2]
-                start_ratio= round(float(video_name['t_start'][0]) / float(video_name['video_duration'][0]),5)
-                start_frame = int(start_ratio * total_frames) 
+                video_name = dict()
+                for k,v in vname.items():
+                    video_name[k] = v[0]
+                print(video_name)
+                # total_frames = videos.shape[2]
+                # start_ratio= round(float(video_name['t_start'][0]) / float(video_name['video_duration'][0]),5)
+                # start_frame = int(start_ratio * total_frames) 
             else:
                 video_name = vname[0]+('.mp4' if args.data_set!='UCF101' else '')
             label = int(target.cpu())
