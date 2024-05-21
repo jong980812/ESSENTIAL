@@ -79,7 +79,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.module.unfreeze(args.unfreeze_layers_after_base)
                     if args.model=='AIM_final':
                         model.module.freeze_all_associ()
-                        model.module.update_from_previous_associ(task_id)
+                        if not args.memory_mode=='global':
+                            model.module.update_from_previous_associ(task_id)
                         model.module.unfreeze_current_associ(task_id)
                     model.to(args.device)
                 

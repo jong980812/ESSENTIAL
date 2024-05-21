@@ -552,7 +552,10 @@ def main(args, ds_init):
         
     if args.ssv2_first_finetune is not None:
         check = torch.load(args.ssv2_first_finetune,'cpu')['model']
-        print(model.load_state_dict(check))
+        if args.memory_mode =='global':
+            print(model.load_state_dict(check,False))
+        else:
+            print(model.load_state_dict(check,True))
         del check
     model.to(device)
     model_without_ddp = model
