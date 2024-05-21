@@ -149,7 +149,7 @@ class Frame_token_decoder(nn.Module):
         self.fs_topk = fs_topk
         d_model = 768
         n_head = 12
-        # self.temporal_encoding = nn.Parameter(torch.zeros(1, num_frames, d_model))
+        self.temporal_encoding = nn.Parameter(torch.zeros(1, num_frames, d_model))
         self.attn = nn.MultiheadAttention(d_model, n_head)
         self.attn_mask = attn_mask
         self.ln_1 = LayerNorm(d_model)
@@ -295,7 +295,7 @@ class AIM_my(nn.Module):
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         # self.transformer_for_cls = Decoder_ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
         self.decoder_cls = nn.Parameter(scale * torch.randn(width))
-        # self.decoder_cls_virtual = nn.Parameter(scale * torch.randn(width))
+        self.decoder_cls_virtual = nn.Parameter(scale * torch.randn(width))
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
         self.cos = args.cos
@@ -468,7 +468,7 @@ class AIM_my(nn.Module):
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         return x
     def forward(self, x: torch.Tensor, train=False,task_id =-1,sample_task_id=-1,
-                get_frame=False,rehearsal = False,inference = False,frame_making=False):
+                get_frame=False,rehearsal = False,inference = False,frame_making=False,selected_frame =None):
             
         B, C, T, H, W = x.shape 
         if get_frame:
@@ -483,7 +483,7 @@ class AIM_my(nn.Module):
                 #     frame_index = torch.tensor([uniform_index], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
                 average_duration = T // 8
                 uniform_index = np.multiply(list(range(8)), average_duration)
-                frame_index = torch.tensor(uniform_index[np.sort(np.random.choice(range(8),self.fs_topk,False))], dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+                frame_index = torch.tensor(np.sort(np.random.choice(range(8),self.fs_topk,False)), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
 
             return frame_index,T,None
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
@@ -510,10 +510,10 @@ class AIM_my(nn.Module):
                 batch.append(p)
             frame_token = torch.cat(batch, dim=0)
         x = x + decoder_temporal_embedding
-        if T!=self.fs_topk:
-            new_x = torch.zeros(B,8,self.embed_dim).to(x.device)
+        if T!=self.fs_topk and not rehearsal:
+            new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
             for i in range(B):
-                new_x[i] = x[i,[0,1,2,3,4,5,6,7]]
+                new_x[i] = x[i,np.sort(np.random.choice(range(8),self.fs_topk,False))]
                 # indice = random_indices[i]
                 # x_ = nn.Parameter(x[i, random_indices[i]],required_grad = False)
                 # new_tokens[i, random_indices[i]] = x
@@ -522,14 +522,16 @@ class AIM_my(nn.Module):
         frame_token = self.decoder_frame_token(new_x,frame_token)#.transpose(0,1)+self.decoder_temporal_embedding
         # frame_token = frame_token.transpose(0,1)
         x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-        token_loss = F.mse_loss(x,frame_token)
         cls_origin = rearrange(cls_origin, 'b t d -> t b d',b=B,t=1)
         if inference:
             return self.inference(cls_origin,x)
         cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
         if rehearsal:
-            return self.rehearsal(cls_origin,cls_virtual,x,frame_token)
+            x_selected = x[torch.arange(B)[:, None], selected_frame]
+            T = self.fs_topk
+            return self.rehearsal(cls_origin,cls_virtual,x_selected,frame_token)
 
+        token_loss = F.mse_loss(x,frame_token)
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
             cls_origin = decoder(cls_origin,x)
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
@@ -560,8 +562,8 @@ class AIM_my(nn.Module):
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)
-            cls_virtual = self.head(cls_virtual)
-        return (cls_origin,cls_virtual),token_loss
+            # cls_virtual = self.head(cls_virtual)
+        return (cls_origin,None),token_loss
     def inference(self,cls_origin,x):
         B=cls_origin.shape[1]
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
@@ -582,6 +584,7 @@ class AIM_my(nn.Module):
             cls_origin = self.head(cls_origin) #+ virtural
         return (cls_origin,None),None
     def rehearsal(self,cls_origin,cls_virtual,x,frame_token):
+        x = x.transpose(0,1)
         B=cls_origin.shape[1]
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
             cls_origin = decoder(cls_origin,x)

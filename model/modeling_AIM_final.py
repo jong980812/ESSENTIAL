@@ -635,8 +635,8 @@ class AIM_final(nn.Module):
         if self.cos:
             cls_origin = F.linear(F.normalize(cls_origin, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
             cls_origin = self.cos_temp * cls_origin  # temperature set as 16
-            cls_virtual = F.linear(F.normalize(cls_virtual, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-            cls_virtual = self.cos_temp * cls_virtual  # temperature set as 16
+            cls_virtual = None#F.linear(F.normalize(cls_virtual, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
+            # cls_virtual = self.cos_temp * cls_virtual  # temperature set as 16
         else:
         # [N, in_channels]
             cls_origin = self.head(cls_origin)

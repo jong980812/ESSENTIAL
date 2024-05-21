@@ -14,6 +14,7 @@ import volume_transforms as volume_transforms
 import torch.distributed as dist
 import math
 import sys
+from collections import defaultdict
 import os
 import av
 from PIL import Image
@@ -105,26 +106,40 @@ class ActivitynetDataset(Dataset):
 
         if utils.is_main_process() and mode == 'train' and  args.memory_size>0 and not rehearsal:
             # save video in rehearsal
-            if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
-                args.memory_video_path['dataset_samples'] += self.dataset_samples
-                args.memory_video_path['label_array'] += self.label_array
-            else:
-                need_size = int(args.memory_size / (task_id + 1))
-                m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
-                indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
+            # if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
+            #     args.memory_video_path['dataset_samples'] += self.dataset_samples
+            #     args.memory_video_path['label_array'] += self.label_array
+            # else:
+            #     need_size = int(args.memory_size / (task_id + 1))
+            #     m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
+            #     indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
 
-                selected_indices = random.sample(range(len(self.label_array)), need_size)
-                selected_labels = [self.label_array[i] for i in selected_indices]
-                selected_samples = [self.dataset_samples[i] for i in selected_indices]
-                label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
-                dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
+            #     selected_indices = random.sample(range(len(self.label_array)), need_size)
+            #     selected_labels = [self.label_array[i] for i in selected_indices]
+            #     selected_samples = [self.dataset_samples[i] for i in selected_indices]
+            #     label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
+            #     dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
 
-                args.memory_video_path['dataset_samples'] = dataset_samples
-                args.memory_video_path['label_array'] = label_array
+            #     args.memory_video_path['dataset_samples'] = dataset_samples
+            #     args.memory_video_path['label_array'] = label_array
+            n = args.rehearsal_samples_per_class
+
+            label_to_indices = defaultdict(list)
+            for index, label in enumerate(self.label_array):
+                label_to_indices[label].append(index)
+
+            # 각 label에서 n개씩 랜덤 샘플링하여 샘플 리스트와 레이블 리스트 생성
+            for label, indices in label_to_indices.items():
+                selected_indices = random.sample(indices, min(n, len(indices)))  # n과 해당 label의 샘플 수 중 더 작은 값을 선택
+                for index in selected_indices:
+                    args.memory_video_path['dataset_samples'].append(self.dataset_samples[index])
+                    args.memory_video_path['label_array'].append(label)
+                    
+            print(f"Task {task_id} - Num: {len(args.memory_video_path['dataset_samples'])}")
             with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
                 json.dump(args.memory_video_path, file)
 
-        assert len(args.memory_video_path['label_array']) <= args.memory_size
+        # assert len(args.memory_video_path['label_array']) <= args.memory_size
 
         if (mode == 'train'):
             pass
@@ -156,7 +171,13 @@ class ActivitynetDataset(Dataset):
                         self.test_label_array.append(sample_label)
                         self.test_dataset.append(self.dataset_samples[idx])
                         self.test_seg.append((ck, cp))
-
+    def update_rehearsal(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+            self.samples_task_id = copy.deepcopy(sample_info['samples_task_id'])
     def __getitem__(self, index):
         if self.mode == 'train':
             args = self.args 
@@ -197,7 +218,7 @@ class ActivitynetDataset(Dataset):
             else:
                 buffer = self._aug_frame(buffer, args)
             
-            return buffer, self.label_array[index], index, self.task_id
+            return buffer, self.label_array[index], index, self.task_id,{}
 
         elif self.mode == 'validation':
             video_info = self.dataset_samples[index]
@@ -222,7 +243,7 @@ class ActivitynetDataset(Dataset):
                     buffer = self.loader(video_name,start_ratio,end_ratio) # T H W C
             buffer = self.data_transform(buffer)
             if self.rehearsal:
-                return buffer, self.label_array[index], video_info,self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index]
+                return buffer, self.label_array[index], video_info,self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index],np.array(self.selected_frame[index]) if len(self.selected_frame)>0 else {}
             return buffer, self.label_array[index], video_name.split("/")[-1].split(".")[0]
 
         elif self.mode == 'test':
@@ -440,10 +461,10 @@ class ActivitynetDataset(Dataset):
         else:
             all_index += list(np.arange(start_frame, start_frame + self.num_segment) % video_length)
         all_index = list(np.array(all_index)) 
-        if all_frames:
-            all_index = [i for i in range(len(vr)-1)]
-        if len(self.selected_frame)>0:#! update되었단 뜻.
-            all_index = self.selected_frame[index]
+        # if all_frames:
+            # all_index = [i for i in range(len(vr)-1)]
+        # if len(self.selected_frame)>0:#! update되었단 뜻.
+        #     all_index = self.selected_frame[index]
         vr.seek(0)
         buffer = vr.get_batch(all_index).asnumpy()
 
