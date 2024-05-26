@@ -335,6 +335,7 @@ class AIM_final(nn.Module):
         self.use_aim_weight = args.use_aim_weight
         self.replay_token = args.replay_token
         self.memory_mode = args.memory_mode
+        self.oracle = args.fine_tune_path
         if args.use_aim_weight:
             self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.order = args.order
@@ -583,7 +584,7 @@ class AIM_final(nn.Module):
         cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
         x = x + decoder_temporal_embedding
         if inference:
-            return self.inference(cls_origin,x)
+            return self.inference(cls_origin,x,cls_virtual,task_id)
         elif rehearsal:
             x_selected = x[torch.arange(B)[:, None], selected_frame]
             return self.rehearsal(cls_origin,cls_virtual,x_selected,sample_task_id,class_id)
@@ -644,14 +645,25 @@ class AIM_final(nn.Module):
         return (cls_origin,cls_virtual),frame_matching_loss,token_matching_loss
     
     
-    def inference(self,cls_origin,x):
+    def inference(self,cls_origin,x,cls_virtual,task_id):
         '''
         cls shape -> t, b, d
         x -> b,t,d
         '''
         B=cls_origin.shape[1]
         B,T,D = x.shape
-        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
+        if self.memory_mode=='task' and self.oracle:
+            # batch = list()
+            # for i in range(B):
+            cur_associator=self.associator[task_id]
+            #     each_x = x[i:i+1,:,:]# 1, t, d
+            frame_prompt = cur_associator(x) # frame_token is (1,len_p,d) 
+                # batch.append(frame_token)
+            # frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
+            frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
+            x = frame_prompt
+        else:
+            x = rearrange(x, 'b t d -> t b d',b=B,t=T)
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
             cls_origin = decoder(cls_origin,x)
         cls_len = cls_origin.shape[0]

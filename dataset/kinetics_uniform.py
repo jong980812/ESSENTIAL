@@ -1,0 +1,494 @@
+import os
+import numpy as np
+from numpy.lib.function_base import disp
+import torch
+import decord, random
+from PIL import Image
+from torchvision import transforms
+from random_erasing import RandomErasing
+import warnings
+from decord import VideoReader, cpu
+from torch.utils.data import Dataset
+import video_transforms as video_transforms 
+from collections import defaultdict
+import volume_transforms as volume_transforms
+import utils, json
+import torch.distributed as dist
+import copy
+
+def write_to_file(data, filename):
+    with open(filename, "w") as f:
+        for item in data:
+            f.write("%s\n" % item)
+            
+def read_from_file(filename):
+    with open(filename, "r") as f:
+        return [line.strip() for line in f.readlines()]
+
+
+class Kinetics_uniform_Dataset(Dataset):
+    """Load your own video classification dataset."""
+
+    def __init__(self, anno_list, data_path, mode='train', clip_len=8,
+                crop_size=224, short_side_size=256, new_height=256,
+                new_width=340, keep_aspect_ratio=True, num_segment=1,
+                num_crop=1, test_num_segment=10, test_num_crop=3, args=None,task_id =-1,
+                 loader='decord',rehearsal=False,return_text=False,all_frames=False,frame_sample_rate=2):
+        self.anno_list = anno_list
+        self.data_path = data_path
+        self.mode = mode
+        self.clip_len = clip_len
+        self.crop_size = crop_size
+        self.short_side_size = short_side_size
+        self.new_height = new_height
+        self.new_width = new_width
+        self.keep_aspect_ratio = keep_aspect_ratio
+        self.num_segment = num_segment
+        self.test_num_segment = test_num_segment
+        self.num_crop = num_crop
+        self.test_num_crop = test_num_crop
+        self.args = args
+        self.aug = False
+        self.rand_erase = False
+        self.rehearsal = rehearsal
+        self.return_text=False
+        self.all_frames = all_frames
+        self.get_val_sample = False
+        self.set_selection_frame = False
+        self.frame_sample_rate = frame_sample_rate
+        self.uniform_ratio = args.uniform_ratio
+        self.task_id = task_id
+        if self.mode in ['train']:
+            self.aug = True
+            if self.args.reprob > 0:
+                self.rand_erase = True
+        if VideoReader is None:
+            raise ImportError("Unable to import `decord` which is required to read videos.")
+        self.label_array = []
+        self.dataset_samples = []
+        self.label_name_array = []
+        self.selected_frame = []
+        self.samples_task_id = []
+        if not rehearsal:
+            for label_num, (label_name, videos) in enumerate(self.anno_list.items()):
+                for video_info in videos:
+                    if task_id == 0:
+                        self.label_array.append(label_num )
+                    else:
+                        self.label_array.append(label_num + args.classes_per_task[task_id-1])
+                    self.dataset_samples.append(video_info)
+                    self.label_name_array.append(label_name)
+
+        else:
+            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+                args.memory_video_path = json.load(file)
+            self.label_array = copy.deepcopy(args.memory_video_path['label_array'])
+            self.dataset_samples = copy.deepcopy(args.memory_video_path['dataset_samples'])
+            # self.mode ='train'
+
+
+
+        if utils.is_main_process() and mode == 'train' and  args.memory_size>0 and not rehearsal:
+            # save video in rehearsal
+            # if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
+            #     args.memory_video_path['dataset_samples'] += self.dataset_samples
+            #     args.memory_video_path['label_array'] += self.label_array
+            # else:
+            #     need_size = int(args.memory_size / (task_id + 1))
+            #     m = len(args.memory_video_path['label_array']) - (args.memory_size - need_size)                    
+            #     indices_to_remove = random.sample(range(len(args.memory_video_path['label_array'])), m)
+
+            #     selected_indices = random.sample(range(len(self.label_array)), need_size)
+            #     selected_labels = [self.label_array[i] for i in selected_indices]
+            #     selected_samples = [self.dataset_samples[i] for i in selected_indices]
+            #     label_array = [args.memory_video_path['label_array'][i] for i in range(len(args.memory_video_path['label_array'])) if i not in indices_to_remove] + selected_labels
+            #     dataset_samples = [args.memory_video_path['dataset_samples'][i] for i in range(len(args.memory_video_path['dataset_samples'])) if i not in indices_to_remove] + selected_samples
+
+            #     args.memory_video_path['dataset_samples'] = dataset_samples
+            #     args.memory_video_path['label_array'] = label_array
+            n = args.rehearsal_samples_per_class
+
+            label_to_indices = defaultdict(list)
+            for index, label in enumerate(self.label_array):
+                label_to_indices[label].append(index)
+
+            # 각 label에서 n개씩 랜덤 샘플링하여 샘플 리스트와 레이블 리스트 생성
+            for label, indices in label_to_indices.items():
+                selected_indices = random.sample(indices, min(n, len(indices)))  # n과 해당 label의 샘플 수 중 더 작은 값을 선택
+                for index in selected_indices:
+                    args.memory_video_path['dataset_samples'].append(self.dataset_samples[index])
+                    args.memory_video_path['label_array'].append(label)
+                    
+            print(f"Task {task_id} - Num: {len(args.memory_video_path['dataset_samples'])}")
+            with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
+                json.dump(args.memory_video_path, file)
+
+        # assert len(args.memory_video_path['label_array']) <= args.memory_size
+        import pandas as pd
+
+
+        if (mode == 'train'):
+            self.val_transform = video_transforms.Compose([
+                video_transforms.Resize(self.short_side_size, interpolation='bilinear'),
+                video_transforms.CenterCrop(size=(self.crop_size, self.crop_size)),
+                volume_transforms.ClipToTensor(),
+                video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225])
+            ])
+            pass
+
+        elif (mode == 'validation'):
+            self.data_transform = video_transforms.Compose([
+                video_transforms.Resize(self.short_side_size, interpolation='bilinear'),
+                video_transforms.CenterCrop(size=(self.crop_size, self.crop_size)),
+                volume_transforms.ClipToTensor(),
+                video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225])
+            ])
+        elif mode == 'test':
+            self.data_resize = video_transforms.Compose([
+                video_transforms.Resize(size=(short_side_size), interpolation='bilinear')
+            ])
+            self.data_transform = video_transforms.Compose([
+                volume_transforms.ClipToTensor(),
+                video_transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225])
+            ])
+            self.test_seg = []
+            self.test_dataset = []
+            self.test_label_array = []
+            for ck in range(self.test_num_segment):
+                for cp in range(self.test_num_crop):
+                    for idx in range(len(self.label_array)):
+                        sample_label = self.label_array[idx]
+                        self.test_label_array.append(sample_label)
+                        self.test_dataset.append(self.dataset_samples[idx])
+                        self.test_seg.append((ck, cp))
+
+    def update_rehearsal(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+            self.samples_task_id = copy.deepcopy(sample_info['samples_task_id'])
+    def update_from_sample_selection(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'selected_sample_frame_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+    def update_train_selected(self,task_id,args):
+        with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'r') as file:
+            sample_info = json.load(file)
+            self.label_array = copy.deepcopy(sample_info['label_array'])
+            self.dataset_samples = copy.deepcopy(sample_info['dataset_samples'])
+            self.selected_frame = copy.deepcopy(sample_info['selected_frame'])
+    def aug_for_cls(self,flag = True):
+        self.get_val_sample = flag
+    def on_selection_frame(self,flag=True):
+        self.set_selection_frame = flag
+    def __getitem__(self, index):
+        if self.mode == 'train':
+            args = self.args 
+            scale_t = 1
+
+            sample = self.dataset_samples[index]
+            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index,uniform_ratio=self.uniform_ratio) # T H W C
+            if len(buffer) == 0:
+                while len(buffer) == 0:
+                    warnings.warn("video {} not correctly loaded during training".format(sample))
+                    index = np.random.randint(self.__len__())
+                    sample = self.dataset_samples[index]
+                    buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t)
+
+            if args.num_sample > 1:
+                frame_list = []
+                label_list = []
+                index_list = []
+                for _ in range(args.num_sample):
+                    new_frames = self._aug_frame(buffer, args)
+                    label = self.label_array[index]
+                    frame_list.append(new_frames)
+                    label_list.append(label)
+                    index_list.append(index)
+                return frame_list, label_list, index_list, {}
+            else:
+                if self.set_selection_frame:
+                    buffer = self.val_transform(buffer)
+                else:
+                    buffer = self._aug_frame(buffer, args)
+  
+            
+            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0], self.task_id,{}
+
+        elif self.mode == 'validation':
+            sample = self.dataset_samples[index]
+            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index,uniform_ratio=2.0)
+            if len(buffer) == 0:
+                while len(buffer) == 0:
+                    warnings.warn("video {} not correctly loaded during validation".format(sample))
+                    index = np.random.randint(self.__len__())
+                    sample = self.dataset_samples[index]
+                    buffer = self.loadvideo_decord(sample)
+            buffer = self.data_transform(buffer)
+            if self.rehearsal:
+                return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0],self.task_id if len(self.samples_task_id)==0 else self.samples_task_id[index], np.array(self.selected_frame[index]) if len(self.selected_frame)>0 else {}
+            return buffer, self.label_array[index], sample.split("/")[-1].split(".")[0]
+
+        elif self.mode == 'test':
+            sample = self.test_dataset[index]
+            chunk_nb, split_nb = self.test_seg[index]
+            buffer = self.loadvideo_decord(sample)
+
+            while len(buffer) == 0:
+                warnings.warn("video {}, temporal {}, spatial {} not found during testing".format(\
+                    str(self.test_dataset[index]), chunk_nb, split_nb))
+                index = np.random.randint(self.__len__())
+                sample = self.test_dataset[index]
+                chunk_nb, split_nb = self.test_seg[index]
+                buffer = self.loadvideo_decord(sample)
+
+            buffer = self.data_resize(buffer)
+            if isinstance(buffer, list):
+                buffer = np.stack(buffer, 0)
+
+            spatial_step = 1.0 * (max(buffer.shape[1], buffer.shape[2]) - self.short_side_size) \
+                                / (self.test_num_crop - 1)
+            temporal_start = chunk_nb # 0/1
+            spatial_start = int(split_nb * spatial_step)
+            if buffer.shape[1] >= buffer.shape[2]:
+                buffer = buffer[temporal_start::2, \
+                       spatial_start:spatial_start + self.short_side_size, :, :]
+            else:
+                buffer = buffer[temporal_start::2, \
+                       :, spatial_start:spatial_start + self.short_side_size, :]
+
+            buffer = self.data_transform(buffer)
+            return buffer, self.test_label_array[index], sample.split("/")[-1].split(".")[0], \
+                   chunk_nb, split_nb
+        else:
+            raise NameError('mode {} unkown'.format(self.mode))
+
+    def _aug_frame(
+        self,
+        buffer,
+        args,
+    ):
+
+        aug_transform = video_transforms.create_random_augment(
+            input_size=(self.crop_size, self.crop_size),
+            auto_augment=args.aa,
+            interpolation=args.train_interpolation,
+        )
+
+        buffer = [
+            transforms.ToPILImage()(frame) for frame in buffer
+        ]
+
+        buffer = aug_transform(buffer)
+
+        buffer = [transforms.ToTensor()(img) for img in buffer]
+        buffer = torch.stack(buffer) # T C H W
+        buffer = buffer.permute(0, 2, 3, 1) # T H W C 
+        
+        # T H W C 
+        buffer = tensor_normalize(
+            buffer, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+        )
+        # T H W C -> C T H W.
+        buffer = buffer.permute(3, 0, 1, 2)
+        # Perform data augmentation.
+        scl, asp = (
+            [0.08, 1.0],
+            [0.75, 1.3333],
+        )
+
+        buffer = spatial_sampling(
+            buffer,
+            spatial_idx=-1,
+            min_scale=256,
+            max_scale=320,
+            crop_size=self.crop_size,
+            random_horizontal_flip=False if args.data_set == 'SSV2' else True,
+            inverse_uniform_sampling=False,
+            aspect_ratio=asp,
+            scale=scl,
+            motion_shift=False
+        )
+
+        if self.rand_erase:
+            erase_transform = RandomErasing(
+                args.reprob,
+                mode=args.remode,
+                max_count=args.recount,
+                num_splits=args.recount,
+                device="cpu",
+            )
+            buffer = buffer.permute(1, 0, 2, 3)
+            buffer = erase_transform(buffer)
+            buffer = buffer.permute(1, 0, 2, 3)
+
+        return buffer
+
+
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1,uniform_ratio=0.5):
+        """Load video content using Decord"""
+        fname = os.path.join(self.data_path,sample)
+        if not (os.path.exists(fname)):
+            return []
+
+        # avoid hanging issue
+        if os.path.getsize(fname) < 1 * 1024:
+            print('SKIP: ', fname, " - ", os.path.getsize(fname))
+            return []
+        try:
+            if self.keep_aspect_ratio:
+                vr = VideoReader(fname, num_threads=1, ctx=cpu(0))
+            else:
+                vr = VideoReader(fname, width=self.new_width, height=self.new_height,
+                                 num_threads=1, ctx=cpu(0))
+        except:
+            print("video cannot be loaded by decord: ", fname)
+            return []
+
+        if self.mode == 'test':
+            all_index = []
+            tick = len(vr) / float(self.num_segment)
+            all_index = list(np.array([int(tick / 2.0 + tick * x) for x in range(self.num_segment)] +
+                               [int(tick * x) for x in range(self.num_segment)]))
+            while len(all_index) < (self.num_segment * self.test_num_segment):
+                all_index.append(all_index[-1])
+            all_index = list(np.sort(np.array(all_index))) 
+            vr.seek(0)
+            buffer = vr.get_batch(all_index).asnumpy()
+            return buffer
+
+        # handle temporal segments
+        average_duration = len(vr) // self.num_segment
+        all_index = []
+        if average_duration > 0:
+            if not rehearsal:
+                all_index += list(np.multiply(list(range(self.num_segment)), average_duration) + np.random.randint(average_duration,
+                                                                                                        size=self.num_segment))
+            else:
+                all_index += list(np.multiply(list(range(self.num_segment)), average_duration))
+        elif len(vr) > self.num_segment:
+            all_index += list(np.sort(np.random.randint(len(vr), size=self.num_segment)))
+        else:
+            all_index += list(np.zeros((self.num_segment,)))
+        all_index = list(np.array(all_index))
+  
+        
+        
+        if all_frames:
+            # all_index = [i for i in range(len(vr))] 
+            pass
+        # if len(self.selected_frame)>0:#! update되었단 뜻.
+        #     # all_index = self.selected_frame[index]
+        #     vr.seek(0)
+        #     buffer = vr.get_batch(all_index).asnumpy()
+        #     return buffer,self.selected_frame[index]
+        vr.seek(0)
+        buffer = vr.get_batch(all_index).asnumpy()
+        return buffer
+
+    def __len__(self):
+        if self.mode != 'test':
+            return len(self.dataset_samples)
+        else:
+            return len(self.test_dataset)
+
+
+def spatial_sampling(
+    frames,
+    spatial_idx=-1,
+    min_scale=256,
+    max_scale=320,
+    crop_size=224,
+    random_horizontal_flip=True,
+    inverse_uniform_sampling=False,
+    aspect_ratio=None,
+    scale=None,
+    motion_shift=False,
+):
+    """
+    Perform spatial sampling on the given video frames. If spatial_idx is
+    -1, perform random scale, random crop, and random flip on the given
+    frames. If spatial_idx is 0, 1, or 2, perform spatial uniform sampling
+    with the given spatial_idx.
+    Args:
+        frames (tensor): frames of images sampled from the video. The
+            dimension is `num frames` x `height` x `width` x `channel`.
+        spatial_idx (int): if -1, perform random spatial sampling. If 0, 1,
+            or 2, perform left, center, right crop if width is larger than
+            height, and perform top, center, buttom crop if height is larger
+            than width.
+        min_scale (int): the minimal size of scaling.
+        max_scale (int): the maximal size of scaling.
+        crop_size (int): the size of height and width used to crop the
+            frames.
+        inverse_uniform_sampling (bool): if True, sample uniformly in
+            [1 / max_scale, 1 / min_scale] and take a reciprocal to get the
+            scale. If False, take a uniform sample from [min_scale,
+            max_scale].
+        aspect_ratio (list): Aspect ratio range for resizing.
+        scale (list): Scale range for resizing.
+        motion_shift (bool): Whether to apply motion shift for resizing.
+    Returns:
+        frames (tensor): spatially sampled frames.
+    """
+    assert spatial_idx in [-1, 0, 1, 2]
+    if spatial_idx == -1:
+        if aspect_ratio is None and scale is None:
+            frames, _ = video_transforms.random_short_side_scale_jitter(
+                images=frames,
+                min_size=min_scale,
+                max_size=max_scale,
+                inverse_uniform_sampling=inverse_uniform_sampling,
+            )
+            frames, _ = video_transforms.random_crop(frames, crop_size)
+        else:
+            transform_func = (
+                video_transforms.random_resized_crop_with_shift
+                if motion_shift
+                else video_transforms.random_resized_crop
+            )
+            frames = transform_func(
+                images=frames,
+                target_height=crop_size,
+                target_width=crop_size,
+                scale=scale,
+                ratio=aspect_ratio,
+            )
+        if random_horizontal_flip:
+            frames, _ = video_transforms.horizontal_flip(0.5, frames)
+    else:
+        # The testing is deterministic and no jitter should be performed.
+        # min_scale, max_scale, and crop_size are expect to be the same.
+        assert len({min_scale, max_scale, crop_size}) == 1
+        frames, _ = video_transforms.random_short_side_scale_jitter(
+            frames, min_scale, max_scale
+        )
+        frames, _ = video_transforms.uniform_crop(frames, crop_size, spatial_idx)
+    return frames
+
+
+def tensor_normalize(tensor, mean, std):
+    """
+    Normalize a given tensor by subtracting the mean and dividing the std.
+    Args:
+        tensor (tensor): tensor to normalize.
+        mean (tensor or list): mean value to subtract.
+        std (tensor or list): std to divide.
+    """
+    if tensor.dtype == torch.uint8:
+        tensor = tensor.float()
+        tensor = tensor / 255.0
+    if type(mean) == list:
+        mean = torch.tensor(mean)
+    if type(std) == list:
+        std = torch.tensor(std)
+    tensor = tensor - mean
+    tensor = tensor / std
+    return tensor

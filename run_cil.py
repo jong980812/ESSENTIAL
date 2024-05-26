@@ -183,7 +183,7 @@ def get_args_cil():
     parser.add_argument('--num_segments', type=int, default= 1)
     parser.add_argument('--num_frames', type=int, default= 16)
     parser.add_argument('--sampling_rate', type=int, default= 4)
-    parser.add_argument('--data_set', default='ActivityNet', choices=['Kinetics-400', 'ActivityNet', 'SSV2','UCF101','CIFAR100'],
+    parser.add_argument('--data_set', default='ActivityNet', choices=['Kinetics-400_uniform','Kinetics-400', 'ActivityNet', 'SSV2','UCF101','CIFAR100'],
                         type=str, help='dataset')
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
@@ -294,7 +294,9 @@ def get_args_cil():
     parser.add_argument('--replay_token', default=False, action='store_true')
     parser.add_argument('--no_valid', default=False, action='store_true')
     parser.add_argument('--no_training', default=False, action='store_true')
+    parser.add_argument('--no_rehearsal', default=False, action='store_true')
     parser.add_argument('--frame_making', default=False, action='store_true')
+    parser.add_argument('--k400_first_finetune', default=None, type=str)
 
     parser.add_argument('--len_prompt', default=8, type=int)
     parser.add_argument('--origin_weight', default=1.0, type=float)
@@ -306,6 +308,7 @@ def get_args_cil():
     parser.add_argument('--task2_weight', default=None, type=str)
     parser.add_argument('--prompt_mode', default='cross', type=str)
     parser.add_argument('--memory_mode', default='task', type=str)
+    parser.add_argument('--fine_tune_path', default=None, type=str)
 
 
 
@@ -337,7 +340,7 @@ def main(args, ds_init):
     
     if args.data_set == 'ActivityNet':
         args.nb_classes = 200
-    elif args.data_set == 'Kinetics-400':
+    elif args.data_set == 'Kinetics-400' or args.data_set == 'Kinetics-400_uniform':
         args.nb_classes = 400
     elif args.data_set == 'SSV2':
         args.nb_classes = 174

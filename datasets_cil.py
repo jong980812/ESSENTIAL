@@ -6,6 +6,7 @@ from dataset.kinetics_cil import KineticsDataset, VideoMAE
 from dataset.ssv2_cil import SSVideoClsDataset
 from dataset.activitynet_cil import ActivitynetDataset
 from dataset.ucf101_cil import UCFVideoClsDataset
+from dataset.kinetics_uniform import Kinetics_uniform_Dataset
 import utils
 def is_double_list(obj):
     if isinstance(obj, list):
@@ -59,7 +60,47 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             rehearsal=rehearsal,
             all_frames=all_frames
             )
-    
+    if args.data_set == 'Kinetics-400_uniform':
+        if is_train is True:
+            mode = 'train'
+            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
+            if not os.path.isdir(data_path):
+                data_path = '/data2/local_datasets/Kinetics-400/videos_train'
+        elif test_mode is True:
+            mode = 'validation'
+            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'test')
+            if not os.path.isdir(data_path):
+                data_path = '/data2/local_datasets/Kinetics-400/videos_test'
+        else:  
+            mode = 'validation'
+            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'val')
+            if not os.path.isdir(data_path):
+                data_path = '/data2/local_datasets/Kinetics-400/videos_val'
+            if rehearsal:
+                data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
+                if not os.path.isdir(data_path):
+                    data_path = '/data2/local_datasets/Kinetics-400/videos_train'
+                
+        dataset = Kinetics_uniform_Dataset(
+            anno_list=anno_list,
+            data_path=data_path,
+            mode=mode,
+            clip_len=1,
+            num_segment=args.num_frames,
+            test_num_segment=args.test_num_segment,
+            test_num_crop=args.test_num_crop,
+            num_crop=1 if not test_mode else 3,
+            keep_aspect_ratio=True,
+            crop_size=args.input_size,
+            short_side_size=args.short_side_size,
+            new_height=256,
+            new_width=320,
+            args=args,
+            task_id = task_id,
+            rehearsal=rehearsal,
+            all_frames=all_frames,
+            frame_sample_rate=args.sampling_rate,
+            )
     elif args.data_set == 'SSV2':
         if is_train is True:
             mode = 'train'

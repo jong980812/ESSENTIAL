@@ -29,6 +29,13 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     rehearsal_stats = {}
     acc_list = []
     for task_id in range(args.num_tasks):
+        if args.fine_tune_path is not None:
+            check = torch.load(os.path.join(args.fine_tune_path,f'task{task_id+1}_checkpoint.pth'),'cpu')['model']
+            if args.memory_mode =='global':
+                print(model.module.load_state_dict(check,False))
+            else:
+                print(model.module.load_state_dict(check,True))
+            del check
         # if task_id<1:
             # continue
         # SSv2 초반 epoch을 위해 만들어놓았지만, 현재 사용 안함.
@@ -109,6 +116,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             #     print('*******task2_weight is applied***********')
             #     del check
             #     break
+            # if ('task1_epoch_20_checkpoint.pth' in args.ssv2_first_finetune) and (epoch<20):
+            #     continue
             if args.ssv2_first_finetune is not None and (task_id<1):
                 break
             if args.joint or args.inference or args.debugging or args.no_training:
@@ -185,7 +194,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             model.module.transformer.eval()
             model.module.conv1.eval()
             for epoch in range(args.rehearsal_epochs):
-                # break
+                if args.no_rehearsal:
+                    break
                 if (args.data_set=='SSV2') and (task_id==0):# and (not args.use_aim_weight):
                     break 
                 if args.distributed:
@@ -556,11 +566,11 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
             if test_mode:
                 header = 'Test: [Task {}]'.format(i + 1)
                 test_stats = evaluate(model=model, data_loader=data_loader[i]['test'], 
-                                    device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
+                                    device=device, task_id=i,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
             else:
                 header = 'VAL: [Task {}]'.format(i + 1)
                 test_stats = evaluate(model=model, data_loader=data_loader[i]['val'], 
-                                    device=device, task_id=task_id,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
+                                    device=device, task_id=i,all_mask=class_mask, class_mask=mask, args=args,header=header,til=False,selector = None)
 
             stat_matrix[0, i] = test_stats['Acc@1']
             stat_matrix[1, i] = test_stats['Acc@5']
