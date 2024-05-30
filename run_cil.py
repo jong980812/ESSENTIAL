@@ -309,6 +309,8 @@ def get_args_cil():
     parser.add_argument('--prompt_mode', default='cross', type=str)
     parser.add_argument('--memory_mode', default='task', type=str)
     parser.add_argument('--fine_tune_path', default=None, type=str)
+    parser.add_argument('--base_tuning', default=False, action='store_true')
+    parser.add_argument('--TA', default=False, action='store_true')
 
 
 
@@ -521,13 +523,19 @@ def main(args, ds_init):
             adapter_scale=0.5,
             num_classes=args.nb_classes,
             dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale
+            init_scale=args.init_scale,
+            args=args
         )
         num_layers = model.layers
         n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
         if args.unfreeze_layers is not None:
             model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
             print('unfreeze list :', unfreeze_list)
+        if args.use_aim_weight is not None:
+            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
+            del weight['head.weight']
+            del weight['head.bias']
+            print(model.load_state_dict(weight,False))
             
     elif args.model == 'CLIP_temporal':
         model = CLIP_temporal(

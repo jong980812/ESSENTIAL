@@ -1,0 +1,14 @@
+Time: 2024-05-28_01-42-47
+  Job: 16x4
+  GPUS: 16
+  Your Memo: ]mn
+
+
+
+Time: 2024-05-28_01-43-36
+  Job: 16x4
+  GPUS: 16
+  Your Memo: ]m
+
+
+

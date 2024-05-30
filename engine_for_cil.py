@@ -248,7 +248,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Training time {}'.format(total_time_str))
 
-        
+        if args.base_tuning:
+            print(f'Now, {task_id}is done, Base task tuning end')
+            exit(0)
 
     if args.output_dir and utils.is_main_process():
         Path(os.path.join(args.output_dir, 'checkpoint')).mkdir(parents=True, exist_ok=True)

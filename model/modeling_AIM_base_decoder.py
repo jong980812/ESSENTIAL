@@ -45,7 +45,7 @@ class QuickGELU(nn.Module):
 
 
 class ResidualAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192,adapter=True):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192,adapter=True,TA=False):
         super().__init__()
         self.num_tadapter = num_tadapter
         self.attn = nn.MultiheadAttention(d_model, n_head)
@@ -58,6 +58,7 @@ class ResidualAttentionBlock(nn.Module):
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
         self.n_head = n_head
+        self.TA = TA
         self.adapter = adapter
         if self.adapter:
             self.dim_mlp = dim_mlp
@@ -67,13 +68,18 @@ class ResidualAttentionBlock(nn.Module):
             self.T_Adapter = Adapter(d_model, skip_connect=False,dim_mlp=self.dim_mlp)
             if num_tadapter == 2:
                 self.T_Adapter_in = Adapter(d_model,dim_mlp=dim_mlp)
+        if self.TA:
+            self.temporal_attn = nn.MultiheadAttention(d_model, n_head)
+            self.ln_temporal = LayerNorm(d_model)
         self.num_frames = num_frames
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
     def attention(self, x: torch.Tensor):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
-
+    def temporal_attention(self, x: torch.Tensor):
+        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        return self.temporal_attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
     def forward(self, x: torch.Tensor, b = 1):
         if self.adapter:
             ## x shape [HW+1, BT, D]
@@ -93,6 +99,20 @@ class ResidualAttentionBlock(nn.Module):
             ## joint adaptation
             xn = self.ln_2(x)
             x = x + self.mlp(xn) + self.drop_path(self.scale * self.MLP_Adapter(xn))
+        elif self.TA:
+            B =b
+            n, bt, d = x.shape
+            T = bt//B
+            ## temporal adaptation
+            xt = rearrange(x, 'n (b t) d -> t (b n) d', t=T)
+            xt = (self.temporal_attention(self.ln_temporal(xt)))
+            xt = rearrange(xt, 't (b n) d -> n (b t) d', n=n)
+            x = self.drop_path(xt)
+            ## spatial adaptation
+            x = self.attention(self.ln_1(x))
+            ## joint adaptation
+            xn = self.ln_2(x)
+            x = x + self.mlp(xn)
         else:
             x = x + self.attention(self.ln_1(x))
             x = x + self.mlp(self.ln_2(x))
@@ -100,13 +120,14 @@ class ResidualAttentionBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,dim_mlp=192,adapter_layers=[]):
+    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,dim_mlp=192,adapter_layers=[],TA=False):
         super().__init__()
         self.width = width
         self.layers = layers
         self.adapter_layers = adapter_layers
+        self.TA=TA
         dpr = [x.item() for x in torch.linspace(0, drop_path, self.layers)]
-        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp,adapter = (i) in self.adapter_layers) for i in range(layers)])
+        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp,adapter = (i) in self.adapter_layers,TA=(self.TA if i==layers-1 else False)) for i in range(layers)])
 
     def forward(self, x: torch.Tensor,b = 1):
         for i,block in enumerate(self.resblocks):
@@ -249,6 +270,7 @@ class AIM_base_decoder(nn.Module):
         self.embed_dim = 768
         self.ba_layers =args.ba_layers
         self.fs_topk = args.fs_topk
+        self.TA = args.TA
         self.n_token_rehearsal = args.n_token_rehearsal
         self.handcrafted_selection = args.handcrafted_selection
         self.selected_selection = args.selected_selection
@@ -260,7 +282,7 @@ class AIM_base_decoder(nn.Module):
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
+        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers,TA=self.TA)
         # self.transformer_for_cls = Decoder_ResidualAttentionBlock_time(width, heads, None,0., num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp)
         self.decoder_cls = nn.Parameter(scale * torch.randn(width))
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])

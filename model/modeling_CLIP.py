@@ -25,7 +25,7 @@ class QuickGELU(nn.Module):
 
 
 class ResidualAttentionBlock(nn.Module):
-    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192):
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, scale=1., num_tadapter=1, num_frames=8, drop_path=0.,dim_mlp=192,TA=False):
         super().__init__()
         self.attn = nn.MultiheadAttention(d_model, n_head)
         self.ln_1 = LayerNorm(d_model)
@@ -37,31 +37,54 @@ class ResidualAttentionBlock(nn.Module):
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
+        self.TA = TA
+        if self.TA:
+            self.temporal_attn = nn.MultiheadAttention(d_model, n_head)
+            self.ln_temporal = LayerNorm(d_model)
     def attention(self, x: torch.Tensor):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
-
-    def forward(self, x: torch.Tensor):
-        x = x + self.attention(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
+    def temporal_attention(self, x: torch.Tensor):
+        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        return self.temporal_attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+    def forward(self, x: torch.Tensor,b=1):
+        if  self.TA:
+            B =b
+            n, bt, d = x.shape
+            T = bt//B
+            ## temporal adaptation
+            xt = rearrange(x, 'n (b t) d -> t (b n) d', t=T)
+            xt = (self.temporal_attention(self.ln_temporal(xt)))
+            xt = rearrange(xt, 't (b n) d -> n (b t) d', n=n)
+            x =  self.drop_path(xt)
+            ## spatial adaptation
+            x = self.attention(self.ln_1(x))
+            ## joint adaptation
+            xn = self.ln_2(x)
+            x = x + self.mlp(xn)
+        else:
+            x = x + self.attention(self.ln_1(x))
+            x = x + self.mlp(self.ln_2(x))
         return x
 
 
 class Transformer(nn.Module):
-    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,dim_mlp=192):
+    def __init__(self, num_frames, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, num_tadapter=1, scale=1., drop_path=0.1,dim_mlp=192,TA=False):
         super().__init__()
         self.width = width
         self.layers = layers
+        self.TA= TA
         dpr = [x.item() for x in torch.linspace(0, drop_path, self.layers)]
-        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp) for i in range(layers)])
+        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, scale, num_tadapter, num_frames, dpr[i],dim_mlp=dim_mlp,TA=(self.TA if i ==layers-1 else False)) for i in range(layers)])
 
-    def forward(self, x: torch.Tensor):
-        return self.resblocks(x)
+    def forward(self, x: torch.Tensor,b = 1):
+        for i,block in enumerate(self.resblocks):
+            x = block(x=x,b=b)
+        return x
 
 class CLIP(nn.Module):
     ## ViT definition in CLIP image encoder
-    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192):
+    def __init__(self, input_resolution: int, num_frames: int, patch_size: int, width: int, layers: int, heads: int, drop_path_rate, num_tadapter=1, adapter_scale=0.5, pretrained=None,num_classes=400,init_scale=0.001,spatial_type='avg',dropout_ratio=0.2,dim_mlp=192,args=None):
         super().__init__()
         self.input_resolution = input_resolution
         self.pretrained = pretrained
@@ -72,11 +95,11 @@ class CLIP(nn.Module):
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
         self.ln_pre = LayerNorm(width)
-
+        self.TA = args.TA
         self.num_frames = num_frames
-        # self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
+        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
 
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp)
+        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=num_tadapter, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,TA=self.TA)
         self.ln_post = LayerNorm(width)
 
         embed_dim = 768
@@ -99,7 +122,17 @@ class CLIP(nn.Module):
         
         
         
-        
+    def unfreeze(self,block_list):
+        unfreeze_list = []
+        for name, param in self.named_parameters():
+            for block in block_list:#if block in block_list
+                if block in name:
+                    param.requires_grad = True
+                    unfreeze_list.append(name)
+                    break
+                else:
+                    param.requires_grad = False
+        print(f'unfreeze_list:{unfreeze_list}')
     def init_weights(self, pretrained=None):
         def _init_weights(m):
             if isinstance(m, nn.Linear):
@@ -142,7 +175,8 @@ class CLIP(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor,train=False,task_id =-1,sample_task_id=-1,
+                get_frame=False,rehearsal = False,inference = False,frame_making=False,selected_frame =None):
         if len(x.shape ) ==4:
             x = x.unsqueeze(2)
         B, C, T, H, W = x.shape #!  EX) Batch size(10), Channel(3), Frames(8), Height(224), Width(224)
@@ -155,10 +189,14 @@ class CLIP(nn.Module):
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
+        n = x.shape[1]
+        x = rearrange(x, '(b t) n d -> (b n) t d', t=T)
+        x = x + self.temporal_embedding
+        x = rearrange(x, '(b n) t d -> (b t) n d', n=n)
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
+        x = self.transformer(x,B)
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x[:, 0]
@@ -175,6 +213,6 @@ class CLIP(nn.Module):
         # [N, in_channels]
         cls_score = self.head(x)
         # [N, num_classes]
-        return cls_score
+        return (cls_score,None),None
         
    
