@@ -585,7 +585,8 @@ class AIM_final(nn.Module):
         if get_frame:
             if self.handcrafted_selection:
                 frame_index = torch.tensor(np.sort(np.random.choice(range(8),self.fs_topk,False)), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-
+                # frame_index = torch.tensor(np.array([0,2,4,6]), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
+            
             return frame_index,T,None
         # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
         if rehearsal:
@@ -614,6 +615,7 @@ class AIM_final(nn.Module):
         new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
         for i in range(B):
             new_x[i] = x[i,np.sort(np.random.choice(range(8),self.fs_topk,False))]
+            # new_x[i] = x[i,np.array([0,2,4,6])]
         if self.memory_mode=='task':
             cur_associator = self.associator[task_id]
             frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check

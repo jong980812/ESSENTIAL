@@ -108,9 +108,11 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             mode = 'validation'
         else:  
             mode = 'validation'
-        data_path ='/local_datasets/something-something-v2/videos'
+        data_path ='/data2/local_datasets/something-something/something-something-v2-mp4'
         if not os.path.isdir(data_path):
             data_path = '/local_datasets/something-something/something-something-v2-mp4'
+        if not os.path.isdir(data_path):
+            data_path ='/local_datasets/something-something-v2/videos'
         dataset = SSVideoClsDataset(
             anno_list=anno_list,
             data_path=data_path,
