@@ -7,7 +7,12 @@ import torch.nn.functional as F
 from torch import nn
 import clip
 from einops import rearrange
+
+
 np.random.seed(0)
+
+
+
 
 class Adapter(nn.Module):
     def __init__(self, D_features, dim_mlp=192, act_layer=nn.GELU, skip_connect=True):
@@ -34,7 +39,7 @@ class LayerNorm(nn.LayerNorm):
 
     def forward(self, x: torch.Tensor):
         orig_type = x.dtype
-        ret = super().forward(x.type(torch.float32))
+        ret = super().forward(x.type(torch.float16))
         return ret.type(orig_type)
 
 
@@ -174,6 +179,8 @@ class Associator(nn.Module):
         # self.temporal_encoding = nn.Parameter(torch.zeros(1, num_frames, d_model))
         self.len_prompt = len_prompt
         self.mode = mode
+        self.prompt = nn.Parameter(torch.FloatTensor(len_prompt, d_model), requires_grad=True)
+        nn.init.uniform_(self.prompt)
         if mode == 'cross' or mode=='self':
             self.attn = nn.MultiheadAttention(d_model, n_head)
             self.attn_mask = attn_mask
@@ -182,13 +189,9 @@ class Associator(nn.Module):
             self.ln_tokens = LayerNorm(d_model)
             self.mlp = nn.Sequential(OrderedDict([
                 ("c_fc", nn.Linear(d_model, d_model * 4)),
-                # ("c_fc", nn.Linear(d_model, d_model )),
                 ("gelu", QuickGELU()),
-                # ("c_proj", nn.Linear(d_model , d_model))
-                ("c_proj", nn.Linear(d_model * 4 , d_model))
+                ("c_proj", nn.Linear(d_model * 4, d_model))
                 ]))
-            self.prompt = nn.Parameter(torch.FloatTensor(len_prompt, d_model), requires_grad=True)
-            nn.init.uniform_(self.prompt)
         elif mode =='3_layer_mlp':
             self.mlp = nn.Sequential(OrderedDict([
                 ("c_fc1", nn.Linear(d_model, d_model)),
@@ -197,8 +200,6 @@ class Associator(nn.Module):
                 ("gelu", QuickGELU()),
                 ("c_fc3", nn.Linear(d_model,d_model))
                 ]))
-            self.prompt = nn.Parameter(torch.FloatTensor(len_prompt, d_model), requires_grad=True)
-            nn.init.uniform_(self.prompt)
         elif mode =='general':
             pass
             # self.mlp = nn.Sequential(OrderedDict([
@@ -208,52 +209,29 @@ class Associator(nn.Module):
             #     ("gelu", QuickGELU()),
             #     ("c_fc3", nn.Linear(d_model,d_model))
             #     ]))
-        elif mode =='linear':#!2.8M
-            self.mlp = nn.Sequential(OrderedDict([
-                ("c_fc1", nn.Linear(self.fs_topk*d_model, self.fs_topk*d_model)),
-                ("gelu", QuickGELU()),
-                ("c_fc2", nn.Linear(self.fs_topk*d_model , self.len_prompt*d_model)),
-                ("gelu", QuickGELU()),
-                ("c_fc3", nn.Linear(self.len_prompt*d_model , self.len_prompt*d_model)),
-                ]))
     def forward(self, x):
         B,kv_T,D = x.shape
-
+        frame_token = self.prompt.expand(B,-1,-1)
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
+        frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
         if self.mode=='general':
             pass
             # frame_token= frame_token + self.mlp(frame_token)
         elif self.mode =='cross':
-            frame_token = self.prompt.expand(B,-1,-1)
-            frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
             ln_tokens = self.ln_tokens(frame_token)#!T,b,d
             frame_token = frame_token + self.drop_path(self.attention(ln_tokens,self.ln_1(x)))
             frame_token = frame_token + self.drop_path(self.mlp(self.ln_2(frame_token)))
-            frame_token = rearrange(frame_token, 't b d -> b t d',b=B,t=self.len_prompt)
-
         elif self.mode =='self':
-            frame_token = self.prompt.expand(B,-1,-1)
-            frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
             ln_tokens = self.ln_tokens(frame_token)#!T,b,d
             ln_x = self.ln_1(x)
             new_x = torch.cat([ln_x,ln_tokens],dim=0)# (kv_T+len prompt, B, D)
             new_x = new_x+self.drop_path(self.attention(new_x,new_x))
             new_x = new_x + self.drop_path(self.mlp(self.ln_2(new_x)))
             frame_token = new_x[kv_T:,:,:]
-            frame_token = rearrange(frame_token, 't b d -> b t d',b=B,t=self.len_prompt)
-            
         elif self.mode =='3_layer_mlp':
-            frame_token = self.prompt.expand(B,-1,-1)
-            frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
             x = self.mlp(x)
             frame_token = frame_token+x
-            frame_token = rearrange(frame_token, 't b d -> b t d',b=B,t=self.len_prompt)
-            
-        elif self.mode =='linear':
-            x = rearrange(x, 't b d -> b ( t d )', b = B, t = kv_T)
-            x = self.mlp(x)
-            frame_token = rearrange(x, 'b ( t d ) -> b t d ', b = B, t = self.len_prompt)
-        # frame_token = rearrange(frame_token, 't b d -> b t d',b=B,t=self.len_prompt)
+        frame_token = rearrange(frame_token, 't b d -> b t d',b=B,t=self.len_prompt)
         return frame_token
     def freeze(self,block_list=None):
         freeze_list = []
@@ -364,7 +342,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             cls = self.time_up(x_cls)+cls
         return cls
 
-class AIM_final(nn.Module):
+class AIM_final_vmae(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int,
                  num_frames: int,
@@ -383,20 +361,21 @@ class AIM_final(nn.Module):
                 dim_mlp=192,
                 adapter_layers=[],
                 class_mask=None,
-                args=None):
+                args=None,
+                videomae=None
+                ):
         super().__init__()
-        self.args = args
         self.input_resolution = input_resolution
         self.pretrained = pretrained
-        self.conv1 = nn.Conv2d(in_channels=3,out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
+        # self.conv1 = nn.Conv2d(in_channels=3,out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
         scale = width ** -0.5
         self.layers = layers
-        self.class_embedding = nn.Parameter(scale * torch.randn(width))
+        # self.class_embedding = nn.Parameter(scale * torch.randn(width))
         self.embed_dim = 768
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
         self.imagenet=args.imagenet
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=True if self.imagenet else False)
-        self.ln_pre = LayerNorm(width) if not self.imagenet else nn.Identity()
+        # self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=True if self.imagenet else False)
+        # self.ln_pre = LayerNorm(width) if not self.imagenet else nn.Identity()
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
         self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
@@ -406,7 +385,7 @@ class AIM_final(nn.Module):
         self.oracle = args.fine_tune_path
         self.TA = args.TA
         # if args.use_aim_weight:
-        self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
+        # self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.order = args.order
         if self.order:
             self.temp_head = nn.Linear(width, num_frames)
@@ -427,14 +406,12 @@ class AIM_final(nn.Module):
                 self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,class_id = i,task_id=-1,mode=args.prompt_mode)for i in range(args.nb_classes)])
             elif self.memory_mode=='task':
                 self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=i,mode=args.prompt_mode) for i in range(args.num_tasks)])
-            elif self.memory_mode =='identity':
-                self.associator = nn.Identity()
         if self.order:
             self.temp_head = nn.Linear(self.embed_dim, num_frames)
             trunc_normal_(self.temp_head.weight, std=.02)
             self.temp_head.weight.data.mul_(init_scale)
             self.temp_head.bias.data.mul_(init_scale)
-        self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers,TA=self.TA)
+        # self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers,TA=self.TA)
         self.decoder_cls = nn.Parameter(scale * torch.randn(width))
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.ba_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.ba_layers)])
         self.ln_post = LayerNorm(width)
@@ -445,12 +422,15 @@ class AIM_final(nn.Module):
                 
         #!!
         
+        self.videomae =videomae
+        
+        #!
 
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         # self.head_virtual = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         trunc_normal_(self.head.weight, std=.02)
         # trunc_normal_(self.head_virtual.weight, std=.02)
-        self.init_weights(pretrained='clip')
+        # self.init_weights(pretrained='clip')
         self.head.weight.data.mul_(init_scale)
         # self.head_virtual.weight.data.mul_(init_scale)
         self.head.bias.data.mul_(init_scale)
@@ -597,7 +577,7 @@ class AIM_final(nn.Module):
     @torch.jit.ignore
     def no_weight_decay(self):
         return {'absolute_pos_embed', 'temporal_embedding','decoder_temporal_embedding'}
-    
+
     @torch.jit.ignore
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table', 'temporal_position_bias_table'}
@@ -605,31 +585,32 @@ class AIM_final(nn.Module):
         if len(x.shape)==4:#! 이미지 입력 들어왔을 떄 대비
             x = x.unsqueeze(2)
         B, C, T, H, W = x.shape 
-        x = rearrange(x, 'b c t h w -> (b t) c h w')
-        x = self.conv1(x)
-        x = x.reshape(x.shape[0], x.shape[1], -1) 
-        x = x.permute(0, 2, 1)
+        # x = rearrange(x, 'b c t h w -> (b t) c h w')
+        # x = self.conv1(x)
+        # x = x.reshape(x.shape[0], x.shape[1], -1) 
+        # x = x.permute(0, 2, 1)
         
-        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
-        #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
-        x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
-        if self.use_aim_weight:#! AIM은 temporal embedding들어옴.
-            temporal_embedding=self.temporal_embedding 
-            if temporal_embedding.shape[1]!=(T):
-                temporal_embedding = F.interpolate(
-                    temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
-                ).squeeze(1)
-            n = x.shape[1]
-            x = rearrange(x, '(b t) n d -> (b n) t d', t=T)
-            x = x + temporal_embedding
-            x = rearrange(x, '(b n) t d -> (b t) n d', n=n)
-        x = self.ln_pre(x)
+        # x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
+        # #! Add classification token-> 각 프레임당 1개씩 ex) (8*10), 196+1, 768 
+        # x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
+        # if self.use_aim_weight:#! AIM은 temporal embedding들어옴.
+        #     temporal_embedding=self.temporal_embedding 
+        #     if temporal_embedding.shape[1]!=(T):
+        #         temporal_embedding = F.interpolate(
+        #             temporal_embedding.unsqueeze(1), size=(T,768), mode='bilinear', align_corners=False
+        #         ).squeeze(1)
+        #     n = x.shape[1]
+        #     x = rearrange(x, '(b t) n d -> (b n) t d', t=T)
+        #     x = x + temporal_embedding
+        #     x = rearrange(x, '(b n) t d -> (b t) n d', n=n)
+        # x = self.ln_pre(x)
 
-        x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x,B)
-        x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_post(x)
-        x = x[:, 0]
+        # x = x.permute(1, 0, 2)  # NLD -> LND
+        # x = self.transformer(x,B)
+        # x = x.permute(1, 0, 2)  # LND -> NLD
+        # x = self.ln_post(x)
+        # x = x[:, 0]
+        x = self.videomae(x)
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         return x
     def forward(self, x: torch.Tensor, train=False,class_id=-1,task_id =-1,sample_task_id=-1,
@@ -659,15 +640,7 @@ class AIM_final(nn.Module):
             with torch.no_grad():
                 x = self.get_cls_tokens(x)
         else:
-            #! 
-            # self.args.flops = True
-            if rehearsal:
-                with torch.no_grad():
-                    x = self.get_cls_tokens(x)
-            else: 
-                x = self.get_cls_tokens(x)
-                # x = torch.randn(1, 8, 768, device=x.device, dtype=x.dtype)
-                # task_id=0
+            x = self.get_cls_tokens(x)
         # final = self.head(x.mean(1))
         # return (final,None),None,None
         decoder_temporal_embedding=self.decoder_temporal_embedding 
@@ -705,44 +678,32 @@ class AIM_final(nn.Module):
                 frame_token = cur_associator(each_x) # frame_token is (1,len_p,d) 
                 batch.append(frame_token)
             frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
-        elif self.memory_mode =='identity':
-            # cur_associator = self.associator[task_id]
-            # frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
-            x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_origin = decoder(cls_origin,x)
-            cls_len = cls_origin.shape[0]
-                
-            cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
-            frame_matching_loss=None
-            token_matching_loss=None
-        if self.memory_mode != 'identity':
-            x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-            frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
-            frame_matching_loss = F.mse_loss(x,frame_prompt) if self.frame_matching else None
+        
+        x = rearrange(x, 'b t d -> t b d',b=B,t=T)
+        frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
+        frame_matching_loss = F.mse_loss(x,frame_prompt) if self.frame_matching else None
 
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_origin = decoder(cls_origin,x)
-            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                # cls_virtual = decoder(cls_virtual,frame_prompt)
-            cls_len = cls_origin.shape[0]
-            cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            token_matching_loss = F.mse_loss(cls_origin, cls_virtual) if self.token_matching else None
-            cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
-            # cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls_origin = decoder(cls_origin,x)
+        for i, decoder in enumerate(self.decoder_transformer_for_cls):
+            cls_virtual = decoder(cls_virtual,frame_prompt)
+        cls_len = cls_origin.shape[0]
+        cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
+        token_matching_loss = F.mse_loss(cls_origin, cls_virtual) if self.token_matching else None
+        cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
+        cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         
         if self.avg_pool is not None:
             cls_origin = self.avg_pool(cls_origin)
-            # cls_virtual = self.avg_pool(cls_virtual)  
+            cls_virtual = self.avg_pool(cls_virtual)
 
         if self.dropout is not None:
             cls_origin = self.dropout(cls_origin)
-            # cls_virtual = self.dropout(cls_virtual)
+            cls_virtual = self.dropout(cls_virtual)
 
         cls_origin = cls_origin.view(cls_origin.shape[0], -1)
-        # cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
+        cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
         
         if self.cos:
             cls_origin = F.linear(F.normalize(cls_origin, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
@@ -770,10 +731,10 @@ class AIM_final(nn.Module):
         if task_id is not None:
             batch = list()
             # for i in range(B):
-            cur_associator=self.associator[0]
+            cur_associator=self.associator[task_id]
             new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
             for i in range(B):
-                new_x[i] = x[i,np.array([3])]
+                new_x[i] = x[i,np.array([1,3,5,7])]
                 # each_x = x[i:i+1,:,:]# 1, t, d
             frame_prompt = cur_associator(new_x) # frame_token is (1,len_p,d) 
             # batch.append(frame_token)
@@ -866,16 +827,8 @@ class AIM_final(nn.Module):
             frame_prompt = cur_associator(x) # frame_token is b len_p d #? debugging으로 req grad check
     
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
-        if self.memory_mode=='identity':
-            x = rearrange(x, 't b d -> b d t')
-            # frame_prompt = F.interpolate(x, size=self.len_prompt, mode='linear', align_corners=False)  # 선형 보간
-            # frame_prompt = rearrange(frame_prompt, 'b d t -> t b d')
-            x = rearrange(x, 'b d t -> t b d')
-            frame_prompt = x.clone()
-        else:
-            frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
-
-    # 다시 원래 형태 (T, B, D)로 변환
+        frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
+        
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
             cls_origin = decoder(cls_origin,x)
         for i, decoder in enumerate(self.decoder_transformer_for_cls):
@@ -883,7 +836,7 @@ class AIM_final(nn.Module):
         cls_len = cls_origin.shape[0]
         cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
         cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-        # token_loss =F.mse_loss(cls_origin, cls_virtual)s
+        # token_loss =F.mse_loss(cls_origin, cls_virtual)
         cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
         cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
         if self.avg_pool is not None:
@@ -995,3 +948,147 @@ def convert_clip(state_dict):
         out_dict['ln_post.weight']= state_dict['norm.weight']
         out_dict['ln_post.bias']=state_dict['norm.bias']
     return out_dict
+
+
+
+
+
+
+
+
+
+
+
+
+# def get_vmae(args):
+#     model = create_model(
+#     "vit_base_patch16_224",
+#     pretrained=False,
+#     num_classes=args.nb_classes,
+#     all_frames=args.num_frames * args.num_segments,
+#     tubelet_size=args.tubelet_size,
+#     fc_drop_rate=args.fc_drop_rate,
+#     drop_rate=args.drop,
+#     drop_path_rate=args.drop_path,
+#     attn_drop_rate=args.attn_drop_rate,
+#     drop_block_rate=None,
+#     use_checkpoint=args.use_checkpoint,
+#     use_mean_pooling=args.use_mean_pooling,
+#     init_scale=args.init_scale,
+#     )
+
+#     patch_size = model.patch_embed.patch_size
+#     print("Patch size = %s" % str(patch_size))
+#     args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
+#     args.patch_size = patch_size
+
+#     if args.finetune:
+#         if args.finetune.startswith('https'):
+#             checkpoint = torch.hub.load_state_dict_from_url(
+#                 args.finetune, map_location='cpu', check_hash=True)
+#         else:
+#             checkpoint = torch.load(args.finetune, map_location='cpu')
+
+#         print("Load ckpt from %s" % args.finetune)
+#         checkpoint_model = None
+#         for model_key in args.model_key.split('|'):
+#             if model_key in checkpoint:
+#                 checkpoint_model = checkpoint[model_key]
+#                 print("Load state_dict by model_key = %s" % model_key)
+#                 break
+#         if checkpoint_model is None:
+#             checkpoint_model = checkpoint
+#         state_dict = model.state_dict()
+#         for k in ['head.weight', 'head.bias']:
+#             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+#                 print(f"Removing key {k} from pretrained checkpoint")
+#                 del checkpoint_model[k]
+
+#         all_keys = list(checkpoint_model.keys())
+#         new_dict = OrderedDict()
+#         for key in all_keys:
+#             if key.startswith('backbone.'):
+#                 new_dict[key[9:]] = checkpoint_model[key]
+#             elif key.startswith('encoder.'):
+#                 new_dict[key[8:]] = checkpoint_model[key]
+#             else:
+#                 new_dict[key] = checkpoint_model[key]
+#         checkpoint_model = new_dict
+
+#         # interpolate position embedding
+#         if 'pos_embed' in checkpoint_model:
+#             pos_embed_checkpoint = checkpoint_model['pos_embed']
+#             embedding_size = pos_embed_checkpoint.shape[-1] # channel dim
+#             num_patches = model.patch_embed.num_patches # 
+#             num_extra_tokens = model.pos_embed.shape[-2] - num_patches # 0/1
+
+#             # height (== width) for the checkpoint position embedding 
+#             orig_size = int(((pos_embed_checkpoint.shape[-2] - num_extra_tokens)//(args.num_frames // model.patch_embed.tubelet_size)) ** 0.5)
+#             # height (== width) for the new position embedding
+#             new_size = int((num_patches // (args.num_frames // model.patch_embed.tubelet_size) )** 0.5)
+#             # class_token and dist_token are kept unchanged
+#             if orig_size != new_size:
+#                 print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
+#                 extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+#                 # only the position tokens are interpolated
+#                 pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+#                 # B, L, C -> BT, H, W, C -> BT, C, H, W
+#                 pos_tokens = pos_tokens.reshape(-1, args.num_frames // model.patch_embed.tubelet_size, orig_size, orig_size, embedding_size)
+#                 pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+#                 pos_tokens = torch.nn.functional.interpolate(
+#                     pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+#                 # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
+#                 pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(-1, args.num_frames // model.patch_embed.tubelet_size, new_size, new_size, embedding_size) 
+#                 pos_tokens = pos_tokens.flatten(1, 3) # B, L, C
+#                 new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
+#                 checkpoint_model['pos_embed'] = new_pos_embed
+
+#         load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+        
+
+# def load_state_dict(model, state_dict, prefix='', ignore_missing="relative_position_index"):
+#     missing_keys = []
+#     unexpected_keys = []
+#     error_msgs = []
+#     metadata = getattr(state_dict, '_metadata', None)
+#     state_dict = state_dict.copy()
+#     if metadata is not None:
+#         state_dict._metadata = metadata
+
+#     def load(module, prefix=''):
+#         local_metadata = {} if metadata is None else metadata.get(
+#             prefix[:-1], {})
+#         module._load_from_state_dict(
+#             state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+#         for name, child in module._modules.items():
+#             if child is not None:
+#                 load(child, prefix + name + '.')
+
+#     load(model, prefix=prefix)
+
+#     warn_missing_keys = []
+#     ignore_missing_keys = []
+#     for key in missing_keys:
+#         keep_flag = True
+#         for ignore_key in ignore_missing.split('|'):
+#             if ignore_key in key:
+#                 keep_flag = False
+#                 break
+#         if keep_flag:
+#             warn_missing_keys.append(key)
+#         else:
+#             ignore_missing_keys.append(key)
+
+#     missing_keys = warn_missing_keys
+
+#     if len(missing_keys) > 0:
+#         print("Weights of {} not initialized from pretrained model: {}".format(
+#             model.__class__.__name__, missing_keys))
+#     if len(unexpected_keys) > 0:
+#         print("Weights from pretrained model not used in {}: {}".format(
+#             model.__class__.__name__, unexpected_keys))
+#     if len(ignore_missing_keys) > 0:
+#         print("Ignored weights of {} not initialized from pretrained model: {}".format(
+#             model.__class__.__name__, ignore_missing_keys))
+#     if len(error_msgs) > 0:
+#         print('\n'.join(error_msgs))

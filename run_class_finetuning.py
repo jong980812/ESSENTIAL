@@ -22,7 +22,7 @@ from engine_for_finetuning import train_one_epoch, validation_one_epoch, final_t
 from utils import NativeScalerWithGradNormCount as NativeScaler
 from utils import  multiple_samples_collate
 import utils
-import model.modeling_finetune
+import model.modeling_finetune as modeling_finetune
 from model.AIM import AIM
 from model.CLIP import CLIP
 

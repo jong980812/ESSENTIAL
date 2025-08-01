@@ -113,6 +113,10 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             data_path = '/local_datasets/something-something/something-something-v2-mp4'
         if not os.path.isdir(data_path):
             data_path ='/local_datasets/something-something-v2/videos'
+        if not os.path.isdir(data_path):
+            data_path ='/data2/local_datasets/something-something-v2/videos'
+        # if rehearsal:
+        #     data_path = '/local_datasets/ssv2_generation'
         dataset = SSVideoClsDataset(
             anno_list=anno_list,
             data_path=data_path,
@@ -144,6 +148,39 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
         data_path = '/local_datasets/ucf101/videos'
         if not os.path.isdir(data_path):
             data_path = '/local_datasets/ucf101/videos'
+
+        dataset = UCFVideoClsDataset(
+            anno_list=anno_list,
+            data_path=data_path,
+            mode=mode,
+            clip_len=1,
+            num_segment=args.num_frames,
+            test_num_segment=args.test_num_segment,
+            test_num_crop=args.test_num_crop,
+            num_crop=1 if not test_mode else 3,
+            keep_aspect_ratio=True,
+            crop_size=args.input_size,
+            short_side_size=args.short_side_size,
+            new_height=256,
+            new_width=320,
+            args=args,
+            task_id = task_id,
+            rehearsal=rehearsal,
+            all_frames=all_frames,
+            )
+    elif args.data_set == 'HMDB51':
+
+        if is_train is True:
+            mode = 'train'
+        elif test_mode is True:
+            mode = 'validation'
+        else:  
+            mode = 'validation'
+        data_path = '/data2/local_datasets/hmdb51/videos'
+        if not os.path.isdir(data_path):
+            data_path = '/local_datasets/HMDB51/videos'
+        if not os.path.isdir(data_path):
+            data_path = '/local_datasets/hmdb51/videos'
 
         dataset = UCFVideoClsDataset(
             anno_list=anno_list,
@@ -237,7 +274,10 @@ def build_continual_dataloader(args):
     data_loader_rehearsal = None
     for i in range(args.num_tasks):
         dataset_train = build_dataset(is_train=True, test_mode=False, args=args,anno_list=anno_list['train'][i],task_id=i)
-        dataset_val = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['val'][i],task_id=i)
+        if args.data_set=='UCF101':
+            dataset_val = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['test'][i],task_id=i)
+        else:
+            dataset_val = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['val'][i],task_id=i)
         dataset_for_cls = build_dataset(is_train=False, test_mode=False, args=args,anno_list=anno_list['val'][i],task_id=i,all_frames = True)
         
         # if args.data_set == 'SSV2':
@@ -296,7 +336,8 @@ def build_continual_dataloader(args):
             batch_size=int(1.5 * args.batch_size),
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
-            drop_last=False
+            drop_last=False,
+            shuffle=False
         )
         data_loader_for_cls = torch.utils.data.DataLoader(
             dataset_for_cls, sampler=sampler_for_cls,

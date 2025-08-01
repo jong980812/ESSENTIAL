@@ -7,7 +7,7 @@ from timm.models.layers import drop_path, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
 import torch.utils.checkpoint as checkpoint
 from torch.nn.init import normal_, constant_
-
+from einops import rearrange
 class Adapter(nn.Module):
     def __init__(self, D_features, dim_mlp=192, act_layer=nn.GELU, skip_connect=True):
         super().__init__()
@@ -233,7 +233,7 @@ class VisionTransformer(nn.Module):
         #cls_token
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         trunc_normal_(self.cls_token, std=.02)
-
+        self.all_frames = all_frames
         #TODO
         # cls_token positional embedding
 
@@ -261,7 +261,7 @@ class VisionTransformer(nn.Module):
         if use_learnable_pos_emb:
             trunc_normal_(self.pos_embed, std=.02)
 
-        trunc_normal_(self.head.weight, std=.02)
+        # trunc_normal_(self.head.weight, std=.02)
         self.apply(self._init_weights)
 
         self.head.weight.data.mul_(init_scale)
@@ -290,12 +290,12 @@ class VisionTransformer(nn.Module):
     def no_weight_decay(self):
         return {'pos_embed', 'cls_token'}
 
-    def get_classifier(self):
-        return self.head
+    # def get_classifier(self):
+        # return self.head
 
-    def reset_classifier(self, num_classes, global_pool=''):
-        self.num_classes = num_classes
-        self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+    # def reset_classifier(self, num_classes, global_pool=''):
+        # self.num_classes = num_classes
+        # self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x):
         x = self.patch_embed(x)
@@ -315,14 +315,19 @@ class VisionTransformer(nn.Module):
 
         x = self.norm(x)
         if self.fc_norm is not None:
-            return self.fc_norm(x.mean(1))
+            return self.fc_norm(x)
             # return self.fc_norm(x[:,0])
         else:
             return x[:, 0]
 
     def forward(self, x):
         x = self.forward_features(x)
-        x = self.head(self.fc_dropout(x))
+        B,D = x.shape[0],x.shape[-1]
+        T = self.all_frames
+        x = rearrange(x,'b (t n) d -> b t n d',b=B,t=T,d=D )
+        x = x.mean(2)
+        x = rearrange(x,'b t d -> (b t) d',b=B,t=T,d=D )
+        # x = self.head(self.fc_dropout(x))
         return x
 
     def augment_classification(self, num_new_classes, device):

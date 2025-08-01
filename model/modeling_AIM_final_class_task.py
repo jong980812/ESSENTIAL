@@ -34,7 +34,7 @@ class LayerNorm(nn.LayerNorm):
 
     def forward(self, x: torch.Tensor):
         orig_type = x.dtype
-        ret = super().forward(x.type(torch.float32))
+        ret = super().forward(x.type(torch.float16))
         return ret.type(orig_type)
 
 
@@ -182,13 +182,11 @@ class Associator(nn.Module):
             self.ln_tokens = LayerNorm(d_model)
             self.mlp = nn.Sequential(OrderedDict([
                 ("c_fc", nn.Linear(d_model, d_model * 4)),
-                # ("c_fc", nn.Linear(d_model, d_model )),
                 ("gelu", QuickGELU()),
-                # ("c_proj", nn.Linear(d_model , d_model))
-                ("c_proj", nn.Linear(d_model * 4 , d_model))
+                ("c_proj", nn.Linear(d_model * 4, d_model))
                 ]))
-            self.prompt = nn.Parameter(torch.FloatTensor(len_prompt, d_model), requires_grad=True)
-            nn.init.uniform_(self.prompt)
+            # self.prompt = nn.Parameter(torch.FloatTensor(len_prompt, d_model), requires_grad=True)
+            # nn.init.uniform_(self.prompt)
         elif mode =='3_layer_mlp':
             self.mlp = nn.Sequential(OrderedDict([
                 ("c_fc1", nn.Linear(d_model, d_model)),
@@ -216,7 +214,7 @@ class Associator(nn.Module):
                 ("gelu", QuickGELU()),
                 ("c_fc3", nn.Linear(self.len_prompt*d_model , self.len_prompt*d_model)),
                 ]))
-    def forward(self, x):
+    def forward(self, x, prompt=None):
         B,kv_T,D = x.shape
 
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
@@ -224,7 +222,8 @@ class Associator(nn.Module):
             pass
             # frame_token= frame_token + self.mlp(frame_token)
         elif self.mode =='cross':
-            frame_token = self.prompt.expand(B,-1,-1)
+            # frame_token = self.prompt.expand(B,-1,-1)
+            frame_token = prompt
             frame_token = rearrange(frame_token, 'b t d -> t b d',b=B,t=self.len_prompt)
             ln_tokens = self.ln_tokens(frame_token)#!T,b,d
             frame_token = frame_token + self.drop_path(self.attention(ln_tokens,self.ln_1(x)))
@@ -364,7 +363,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             cls = self.time_up(x_cls)+cls
         return cls
 
-class AIM_final(nn.Module):
+class AIM_final_class_task(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int,
                  num_frames: int,
@@ -385,7 +384,6 @@ class AIM_final(nn.Module):
                 class_mask=None,
                 args=None):
         super().__init__()
-        self.args = args
         self.input_resolution = input_resolution
         self.pretrained = pretrained
         self.conv1 = nn.Conv2d(in_channels=3,out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
@@ -426,6 +424,8 @@ class AIM_final(nn.Module):
             elif self.memory_mode=='class':
                 self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,class_id = i,task_id=-1,mode=args.prompt_mode)for i in range(args.nb_classes)])
             elif self.memory_mode=='task':
+                self.prompts = nn.Parameter(torch.FloatTensor(args.nb_classes,args.len_prompt, self.embed_dim), requires_grad=True)
+                nn.init.uniform_(self.prompts)
                 self.associator = nn.ModuleList([Associator(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_prompt=self.len_prompt,task_id=i,mode=args.prompt_mode) for i in range(args.num_tasks)])
             elif self.memory_mode =='identity':
                 self.associator = nn.Identity()
@@ -659,15 +659,7 @@ class AIM_final(nn.Module):
             with torch.no_grad():
                 x = self.get_cls_tokens(x)
         else:
-            #! 
-            # self.args.flops = True
-            if rehearsal:
-                with torch.no_grad():
-                    x = self.get_cls_tokens(x)
-            else: 
-                x = self.get_cls_tokens(x)
-                # x = torch.randn(1, 8, 768, device=x.device, dtype=x.dtype)
-                # task_id=0
+            x = self.get_cls_tokens(x)
         # final = self.head(x.mean(1))
         # return (final,None),None,None
         decoder_temporal_embedding=self.decoder_temporal_embedding 
@@ -690,10 +682,16 @@ class AIM_final(nn.Module):
         new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
         for i in range(B):
             new_x[i] = x[i,np.sort(np.random.choice(range(8),self.fs_topk,False))]
+            
             # new_x[i] = x[i,np.array([4,5,6,7])]
         if self.memory_mode=='task':
             cur_associator = self.associator[task_id]
-            frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
+            batch = list()
+            for i in range(B):
+                cur_prompt=self.prompts[class_id[i].item()]
+                batch.append(cur_prompt.unsqueeze(0))
+            prompts = torch.cat(batch, dim=0)# B, len_p, d
+            frame_prompt = cur_associator(new_x,prompts) # frame_token is b len_p d #? debugging으로 req grad check
         elif self.memory_mode =='global':
             cur_associator = self.associator[0]
             frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
@@ -770,10 +768,10 @@ class AIM_final(nn.Module):
         if task_id is not None:
             batch = list()
             # for i in range(B):
-            cur_associator=self.associator[0]
+            cur_associator=self.associator[task_id]
             new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
             for i in range(B):
-                new_x[i] = x[i,np.array([3])]
+                new_x[i] = x[i,np.array([1,3,5,7])]
                 # each_x = x[i:i+1,:,:]# 1, t, d
             frame_prompt = cur_associator(new_x) # frame_token is (1,len_p,d) 
             # batch.append(frame_token)
@@ -846,13 +844,18 @@ class AIM_final(nn.Module):
         assert kv_T == self.fs_topk, "kv_T and self.fs_topk must be equal"
         #?Making bath for rehearsal
         if self.memory_mode=='task':
-            batch = list()
+            # prompt_batch = list()
+            # for i in range(B):
+            #     cur_prompt=self.prompts[class_id[i].item()]
+            #     prompt_batch.append(cur_prompt.unsqueeze(0))
+            # prompts = torch.cat(prompt_batch, dim=0)# B, len_p, d
+            associ_batch = list()
             for i in range(B):
                 cur_associator=self.associator[sample_task_id[i].item()]
                 each_x = x[i:i+1,:,:]# 1, t, d
-                frame_token = cur_associator(each_x) # frame_token is (1,len_p,d) 
-                batch.append(frame_token)
-            frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
+                frame_token = cur_associator(each_x,self.prompts[class_id[i].item()].unsqueeze(0)) # frame_token is (1,len_p,d) 
+                associ_batch.append(frame_token)
+            frame_prompt = torch.cat(associ_batch, dim=0)# B, len_p, d
         elif self.memory_mode =='class':
             batch = list()
             for i in range(B):
@@ -868,10 +871,10 @@ class AIM_final(nn.Module):
         x = rearrange(x, 'b t d -> t b d',b=B,t=kv_T)
         if self.memory_mode=='identity':
             x = rearrange(x, 't b d -> b d t')
-            # frame_prompt = F.interpolate(x, size=self.len_prompt, mode='linear', align_corners=False)  # 선형 보간
-            # frame_prompt = rearrange(frame_prompt, 'b d t -> t b d')
+            frame_prompt = F.interpolate(x, size=self.len_prompt, mode='linear', align_corners=False)  # 선형 보간
+            frame_prompt = rearrange(frame_prompt, 'b d t -> t b d')
             x = rearrange(x, 'b d t -> t b d')
-            frame_prompt = x.clone()
+            # frame_prompt = x.clone()
         else:
             frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
 

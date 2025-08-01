@@ -364,7 +364,7 @@ class Decoder_ResidualAttentionBlock_time(nn.Module):
             cls = self.time_up(x_cls)+cls
         return cls
 
-class AIM_final(nn.Module):
+class AIM_final_flops(nn.Module):
     ## ViT definition in CLIP image encoder
     def __init__(self, input_resolution: int,
                  num_frames: int,
@@ -632,44 +632,14 @@ class AIM_final(nn.Module):
         x = x[:, 0]
         x = rearrange(x, '(b t) d -> b t d',b=B,t=T)
         return x
-    def forward(self, x: torch.Tensor, train=False,class_id=-1,task_id =-1,sample_task_id=-1,
+    def forward(self, x: torch.Tensor, train=False,class_id=-1,task_id =None,sample_task_id=-1,
                 get_frame=False,rehearsal = False,inference = False,frame_making=False,selected_frame=None):
             
-        B, C, T, H, W = x.shape 
-        if get_frame:
-            if self.handcrafted_selection:
-                frame_index = torch.tensor(np.sort(np.random.choice(range(8),self.fs_topk,False)), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # if self.fs_topk==2:
-                #     frame_index = torch.tensor(np.array([2,6]),dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # elif self.fs_topk==1:
-                #     frame_index = torch.tensor(np.array([3]),dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # elif self.fs_topk==3:
-                #     frame_index = torch.tensor(np.array([3,5,7]),dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # elif self.fs_topk==4:
-                #     frame_index = torch.tensor(np.array([1,3,5,7]),dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # elif self.fs_topk==8:
-                #     frame_index = torch.tensor(np.array([0,1,2,3,4,5,6,7]),dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                # else:
-                #     frame_index = torch.tensor(np.sort(np.random.choice(range(8),self.fs_topk,False)), dtype=torch.int32).unsqueeze(0).unsqueeze(0)
-                    
+        x = torch.randn(1, 8, 768).to("cuda")
+        B, T, D = x.shape 
+        # B, C, T, H, W = x.shape 
+        # x = self.get_cls_tokens(x)
 
-            return frame_index,T,None
-        # x = x[:,:,3,:,:].unsqueeze(2)#! single frame
-        if rehearsal:
-            with torch.no_grad():
-                x = self.get_cls_tokens(x)
-        else:
-            #! 
-            # self.args.flops = True
-            if rehearsal:
-                with torch.no_grad():
-                    x = self.get_cls_tokens(x)
-            else: 
-                x = self.get_cls_tokens(x)
-                # x = torch.randn(1, 8, 768, device=x.device, dtype=x.dtype)
-                # task_id=0
-        # final = self.head(x.mean(1))
-        # return (final,None),None,None
         decoder_temporal_embedding=self.decoder_temporal_embedding 
         if decoder_temporal_embedding.shape[1]!=(T):
             decoder_temporal_embedding = F.interpolate(
@@ -681,79 +651,8 @@ class AIM_final(nn.Module):
         cls_virtual = self.decoder_cls.expand(B,-1).unsqueeze(1) # B,1,D
         cls_virtual = rearrange(cls_virtual, 'b t d -> t b d',b=B,t=1)
         x = x + decoder_temporal_embedding
-        if inference:
-            return self.inference(cls_origin,x,cls_virtual,task_id)
-        elif rehearsal:
-            x_selected = x[torch.arange(B)[:, None], selected_frame]
-            return self.rehearsal(cls_origin,cls_virtual,x_selected,sample_task_id,class_id)
+        return self.inference(cls_origin,x,cls_virtual,task_id)
         
-        new_x = torch.zeros(B,self.fs_topk,self.embed_dim).to(x.device)
-        for i in range(B):
-            new_x[i] = x[i,np.sort(np.random.choice(range(8),self.fs_topk,False))]
-            # new_x[i] = x[i,np.array([4,5,6,7])]
-        if self.memory_mode=='task':
-            cur_associator = self.associator[task_id]
-            frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
-        elif self.memory_mode =='global':
-            cur_associator = self.associator[0]
-            frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
-        elif self.memory_mode =='class':
-            batch = list()
-            for i in range(B):
-                cur_associator=self.associator[class_id[i].item()]
-                each_x = x[i:i+1,:,:]# 1, t, d
-                frame_token = cur_associator(each_x) # frame_token is (1,len_p,d) 
-                batch.append(frame_token)
-            frame_prompt = torch.cat(batch, dim=0)# B, len_p, d
-        elif self.memory_mode =='identity':
-            # cur_associator = self.associator[task_id]
-            # frame_prompt = cur_associator(new_x) # frame_token is b len_p d #? debugging으로 req grad check
-            x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_origin = decoder(cls_origin,x)
-            cls_len = cls_origin.shape[0]
-                
-            cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
-            frame_matching_loss=None
-            token_matching_loss=None
-        if self.memory_mode != 'identity':
-            x = rearrange(x, 'b t d -> t b d',b=B,t=T)
-            frame_prompt = rearrange(frame_prompt, 'b t d -> t b d',b=B,t=self.len_prompt)
-            frame_matching_loss = F.mse_loss(x,frame_prompt) if self.frame_matching else None
-
-            for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                cls_origin = decoder(cls_origin,x)
-            # for i, decoder in enumerate(self.decoder_transformer_for_cls):
-                # cls_virtual = decoder(cls_virtual,frame_prompt)
-            cls_len = cls_origin.shape[0]
-            cls_origin = rearrange(cls_origin, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            cls_virtual = rearrange(cls_virtual, 't b d -> b d t',b=B,t=cls_len)#! B,D,cls_len
-            token_matching_loss = F.mse_loss(cls_origin, cls_virtual) if self.token_matching else None
-            cls_origin = cls_origin.unsqueeze(-1).unsqueeze(-1)
-            # cls_virtual = cls_virtual.unsqueeze(-1).unsqueeze(-1)
-        
-        if self.avg_pool is not None:
-            cls_origin = self.avg_pool(cls_origin)
-            # cls_virtual = self.avg_pool(cls_virtual)  
-
-        if self.dropout is not None:
-            cls_origin = self.dropout(cls_origin)
-            # cls_virtual = self.dropout(cls_virtual)
-
-        cls_origin = cls_origin.view(cls_origin.shape[0], -1)
-        # cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
-        
-        if self.cos:
-            cls_origin = F.linear(F.normalize(cls_origin, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-            cls_origin = self.cos_temp * cls_origin  # temperature set as 16
-            cls_virtual = None#F.linear(F.normalize(cls_virtual, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-            # cls_virtual = self.cos_temp * cls_virtual  # temperature set as 16
-        else:
-        # [N, in_channels]
-            cls_origin = self.head(cls_origin)
-            cls_virtual = None#self.head(cls_virtual)# if self.data_set !='SSV2' else None
-        return (cls_origin,cls_virtual),frame_matching_loss,token_matching_loss
     
     
     def inference(self,cls_origin,x,cls_virtual,task_id):
@@ -767,6 +666,7 @@ class AIM_final(nn.Module):
         B=cls_origin.shape[1]
         cls_sparse = cls_origin.clone().detach()
         B,T,D = x.shape
+        task_id=0
         if task_id is not None:
             batch = list()
             # for i in range(B):
@@ -826,12 +726,9 @@ class AIM_final(nn.Module):
         #     cls_virtual = self.dropout(cls_virtual)
         # cls_virtual = cls_virtual.view(cls_virtual.shape[0], -1)
         
-        if self.cos:
-            origin = F.linear(F.normalize(cls_origin, p=2, dim=-1), F.normalize(self.head.weight, p=2, dim=-1))
-            origin = self.cos_temp * cls_origin  # temperature set as 16
-        else:
-            # virtural = self.head(cls_virtual)
-            origin = self.head(cls_origin) #+ virtural
+
+        # virtural = self.head(cls_virtual)
+        origin = self.head(cls_origin) #+ virtural
             # origin = (origin+virtural)/2.0
         return (origin ,frame_prompt),(frame_matching_loss)
     

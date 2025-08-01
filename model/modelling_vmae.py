@@ -200,6 +200,8 @@ class VisionTransformer(nn.Module):
                  img_size=224, 
                  patch_size=16, 
                  in_chans=3, 
+                 pretrained_cfg=None,
+                 pretrained_cfg_overlay=None,
                  num_classes=1000, 
                  embed_dim=768, 
                  depth=12,

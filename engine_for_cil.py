@@ -36,8 +36,11 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             else:
                 print(model.module.load_state_dict(check,True))
             del check
-        # if task_id<1:
-            # continue
+        if args.tsne:
+            # if task_id<5:
+            #     continue
+            tsne(model=model,data_loaders=data_loader,device=device,args=args)
+            return
         # SSv2 초반 epoch을 위해 만들어놓았지만, 현재 사용 안함.
         if task_id == 0 and args.data_set == "SSV2":
             warmup_epochs,epochs = args.warmup_epochs,args.epochs
@@ -46,7 +49,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             
         print(f'task {task_id+1}/{args.num_tasks}')
         start_time = time.time()
-        
+         
         #lr scehdule
         total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
         num_training_steps_per_epoch = len(data_loader[task_id]['train'].dataset) // total_batch_size
@@ -82,14 +85,14 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 ) 
             else:
 
-                if 'AIM' in args.model:
-                    model.module.unfreeze(args.unfreeze_layers_after_base)
-                    if args.model=='AIM_final':
-                        model.module.freeze_all_associ()
-                        if not args.memory_mode=='global':
-                            model.module.update_from_previous_associ(task_id)
-                        model.module.unfreeze_current_associ(task_id)
-                    model.to(args.device)
+                # if 'AIM' in args.model:
+                model.module.unfreeze(args.unfreeze_layers_after_base)
+                if 'AIM_final' in args.model:
+                    model.module.freeze_all_associ()
+                    # if not args.memory_mode=='global':
+                    #     model.module.update_from_previous_associ(task_id)
+                    model.module.unfreeze_current_associ(task_id)
+                model.to(args.device)
                 
                 optimizer = create_optimizer(
                 args, model_without_ddp, skip_list=args.skip_weight_decay_list,
@@ -108,7 +111,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     'optimizer': optimizer.state_dict(),
                     'args': args,
                 }
-        utils.save_on_master(state_dict, checkpoint_path)
+        # utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
             # if args.task2_weight is not None and task_id==1:
             #     check = torch.load(args.ssv2_first_finetune,'cpu')['model']
@@ -166,7 +169,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             # print('Freeze for rehearsal')
                    # lr scehdule
             # model.module.unfreeze(args.unfreeze_layers_rehearsal)
-            if args.model =='AIM_final':
+            if 'AIM_final' in args.model:
                 model.module.freeze_all_associ()
             optimizer = create_optimizer(
             args, model_without_ddp, skip_list=args.skip_weight_decay_list,
@@ -191,9 +194,15 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
             print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
             print("Backbone Freeze")
-            model.module.transformer.eval()
-            model.module.conv1.eval()
+            if not args.model=='AIM_final_vmae':
+                model.module.transformer.eval()
+                model.module.conv1.eval()
+            if args.model=='AIM_final_vmae':
+                model.module.videomae.eval()
             for epoch in range(args.rehearsal_epochs):
+
+
+
                 if args.no_rehearsal:
                     break
                 if (args.data_set=='SSV2') and (task_id==0):# and (not args.use_aim_weight):
@@ -312,7 +321,6 @@ def train_one_epoch(model: torch.nn.Module,
         #     for c in classes:
         #         targets[targets == c] = class_index
         targets = targets.to(device, non_blocking=True)
-        
         mask = None
         if class_mask is not None:
             if rehearsal:
@@ -371,12 +379,13 @@ def train_one_epoch(model: torch.nn.Module,
             # this attribute is added by timm on one optimizer (adahessian)
             is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
             loss /= update_freq
+            # print_memory("Before backward")
             grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
                                     parameters=model.parameters(), create_graph=is_second_order,
                                     update_grad=(data_iter_step + 1) % update_freq == 0)
             if (data_iter_step + 1) % update_freq == 0:
                 optimizer.zero_grad()
-
+            # print_memory("After backward")
             loss_scale_value = loss_scaler.state_dict()["scale"]
 
         torch.cuda.synchronize()
@@ -480,9 +489,106 @@ def get_loss_scale_for_deepspeed(model):
     optimizer = model.optimizer
     return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
 
+@torch.no_grad()
+def tsne(model: torch.nn.Module,  data_loaders, 
+            device, task_id=-1,all_mask = None, class_mask=None, args=None,header=None,til=False
+            ,selector = None,get_all_frame=False):
 
+    # 원하는 경로
+    model.eval()
+    import pickle
+    with torch.no_grad():
+        path = f"{args.output_dir}/t_sne/tcd_ssv2_train"
+        if not os.path.exists(path):
+            os.makedirs(path)
+            print(f"경로 '{path}'가 생성되었습니다.")
+        else:
+            print(f"경로 '{path}'는 이미 존재합니다.")
+        for i in range(1,args.num_tasks):
+            if args.fine_tune_path is not None:
+                check = torch.load(os.path.join(args.fine_tune_path,f'task{i+1}_checkpoint.pth'),'cpu')['model']
+                print(model.module.load_state_dict(check,True))
+            matching_losses = []
+            # 경로가 없을 경우 생성
+            data_loader= data_loaders[i]['train']
+            masked_token_list = []
+            pstatic_list = []
+            unmasked_list = []
+            cls_origin_list =[]
+            cls_virtual_list =[]
+            cls_sparse_list =[]
+            n_sample = len(data_loader.dataset)
+            # act_matrix.append(model(image).squeeze().cpu().detach().numpy()) #128 * 1000
+            for j,batch in enumerate(data_loader):
+                videos = batch[0]
+                target = batch[1]            
+                videos = videos.to(device, non_blocking=True)
+                    # for class_index, classes in enumerate(all_mask):
+                    #     for c in classes:
+                    #         target[target == c] = class_index
+                target = target.to(device, non_blocking=True)
+                print(f'Task {i}: {j*videos.shape[0]}/{n_sample}')
+                # compute output
+                
+                with torch.cuda.amp.autocast():
+                    # selection = selector(videos)
+                    # selection_results = selection.argmax(1)#(B)
+                    # if args.order:
+                    # tokens = model.module.get_cls_tokens(videos)
+                    output,frame_matching_loss,tokens,video_tokens = model(x=videos,task_id=i,inference=True)
+                    cls_origin,cls_virtual,cls_sparse = video_tokens
+                    tokens= tokens.permute(1,0,2)
+                    # print(torch.functional.F.pairwise_distance(cls_origin,cls_virtual,p=2).mean())
+                    new_tokens_list = []
+                    for b in range(tokens.shape[0]):
+    # 랜덤한 두 개의 인덱스를 선택합니다.
+                        random_indices = np.sort(np.random.choice(range(8),4,False))#random.sample(range(8), 4)
+                        
+                        # 선택된 인덱스에 해당하는 텐서를 추출합니다.
+                        selected_tokens = tokens[b, random_indices, :]
+                        
+                        # 리스트에 추가합니다.
+                        new_tokens_list.append(selected_tokens)
 
-
+                    # 리스트를 텐서로 변환합니다.
+                    masked_token = torch.stack(new_tokens_list)#.mean(1)
+                    unmasked_token = tokens#.mean(1)
+                    # print(np.linalg.norm(s_feature - s_masked_feature, axis=1))
+                    # output,frame_matching_loss,tokens = model(x=videos,task_id=i,inference=True)
+                    
+                    pstatic =output[1].permute(1,0,2)#.mean(1)
+                    
+                    
+                    masked_token_list.append(masked_token.cpu().detach().numpy())
+                    pstatic_list.append(pstatic.cpu().detach().numpy())
+                    unmasked_list.append(unmasked_token.cpu().detach().numpy())
+                    matching_losses.append(frame_matching_loss.item())
+                    # cls_origin_list.append(cls_origin.cpu().detach().numpy())
+                    # cls_virtual_list.append(cls_virtual.cpu().detach().numpy())
+                    # cls_sparse_list.append(cls_sparse.cpu().detach().numpy())
+            masked_token_list = np.concatenate(masked_token_list, axis=0)
+            pstatic_list = np.concatenate(pstatic_list, axis=0)
+            unmasked_list = np.concatenate(unmasked_list, axis=0)
+            # cls_origin_list = np.concatenate(cls_origin_list, axis=0)
+            # cls_virtual_list = np.concatenate(cls_virtual_list, axis=0)
+            # cls_sparse_list = np.concatenate(cls_sparse_list, axis=0)
+            # unmasked_list = np.concatenate(unmasked_list, axis=0)
+            with open(os.path.join(path,f"{i}_all_masked"), 'wb') as f:
+                pickle.dump(masked_token_list, f)
+            with open(os.path.join(path,f"{i}_all_pstatic"), 'wb') as f:
+                pickle.dump(pstatic_list, f)
+            with open(os.path.join(path,f"{i}_all_unmasked"), 'wb') as f:
+                pickle.dump(unmasked_list, f)
+            # with open(os.path.join(path,f"{i}_all_cls_origin"), 'wb') as f:
+            #     pickle.dump(cls_origin_list, f)
+            # with open(os.path.join(path,f"{i}_all_cls_virtual"), 'wb') as f:
+            #     pickle.dump(cls_virtual_list, f)
+            # with open(os.path.join(path,f"{i}_all_cls_sparse"), 'wb') as f:
+            #     pickle.dump(cls_sparse_list, f)
+            print(np.mean(matching_losses))
+            # with open(f"{args.output_dir}/t_sne/{i}_unmasked", 'wb') as f:
+            #     pickle.dump(unmasked_list, f)
+    exit
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module,  data_loader, 
@@ -526,9 +632,10 @@ def evaluate(model: torch.nn.Module,  data_loader,
                 # selection = selector(videos)
                 # selection_results = selection.argmax(1)#(B)
                 # if args.order:
-                logits,_ = model(videos,train=False,task_id=task_id,inference = True)
+                logits,frame_loss = model(videos,train=False,task_id=None,inference = True)
                 logits = logits[0]
                 # else:
+                
                 # logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
                        
                 # if til:
@@ -538,15 +645,15 @@ def evaluate(model: torch.nn.Module,  data_loader,
                 loss = criterion(logits, target)
 
             acc1, acc5 = accuracy(logits, target, topk=(1, 5))
-
+            # metric_logger.meters['Frame_matching'].update(frame_loss.item())
             metric_logger.meters['Loss'].update(loss.item())
             metric_logger.meters['Acc@1'].update(acc1.item(), n=videos.shape[0])
             metric_logger.meters['Acc@5'].update(acc5.item(), n=videos.shape[0])
             
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
-          .format(top1=metric_logger.meters['Acc@1'], top5=metric_logger.meters['Acc@5'], losses=metric_logger.meters['Loss']))
+    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'#frame loss {frame_matching.global_avg:.3f}'
+          .format(top1=metric_logger.meters['Acc@1'], top5=metric_logger.meters['Acc@5'], losses=metric_logger.meters['Loss'])),#frame_matching=metric_logger.meters['Frame_matching']))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -691,7 +798,7 @@ def save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask):
             print("error")
         new_memory[label] = top_entries
     total_items = sum(len(items) for items in new_memory.values())
-    if total_items>args.memory_size: print(f"{total_items} is over {args.memory_size}: Calibrating") 
+    if total_items > args.memory_size: print(f"{total_items} is over {args.memory_size}: Calibrating") 
     while total_items > args.memory_size:
         labels_with_full_save_num = [label for label in new_memory if len(new_memory[label]) == save_num]
         if not labels_with_full_save_num:
@@ -778,7 +885,7 @@ def save_frame_index(model: torch.nn.Module,
                 # start_ratio= round(float(video_name['t_start'][0]) / float(video_name['video_duration'][0]),5)
                 # start_frame = int(start_ratio * total_frames) 
             else:
-                video_name = vname[0]+('.mp4' if args.data_set!='UCF101' else '')
+                video_name = vname[0]+('' if ((args.data_set=='UCF101') or (args.data_set=='HMDB51')) else '.mp4')
             label = int(target.cpu())
             if task_id!=0:
                 if (video_name in pre_dataset_samples):
@@ -915,3 +1022,55 @@ def compute_video(lst):
 
 
 
+import torch
+
+def print_memory(tag=""):
+    print(f"[{tag}] Allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    print(f"[{tag}] Reserved : {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+    
+    
+def get_model_size_in_mb(model):
+    param_size = 0
+    for param in model.parameters():
+        param_size += param.numel() * param.element_size()  # element 수 × 바이트
+    buffer_size = 0
+    for buffer in model.buffers():
+        buffer_size += buffer.numel() * buffer.element_size()
+    total_size = (param_size + buffer_size) / 1024**2  # byte → MB
+    return total_size
+def analyze_model_size(model):
+    total_params = 0
+    learnable_params = 0
+    param_size_bytes = 0
+    buffer_size_bytes = 0
+
+    for param in model.parameters():
+        numel = param.numel()
+        total_params += numel
+        if param.requires_grad:
+            learnable_params += numel
+        param_size_bytes += numel * param.element_size()
+
+    for buffer in model.buffers():
+        buffer_size_bytes += buffer.numel() * buffer.element_size()
+
+    total_size_mb = (param_size_bytes + buffer_size_bytes) / 1024**2
+
+    print(f"🧮 Total parameters         : {total_params:,}")
+    print(f"🧠 Learnable parameters     : {learnable_params:,}")
+    print(f"💾 Model size (float32)     : {total_size_mb:.2f} MB")
+    return total_params, learnable_params, total_size_mb
+
+import sys
+
+def get_tensor_size_in_bytes(tensor):
+    return tensor.numel() * tensor.element_size()
+
+def get_model_memory_usage(model):
+    total_bytes = 0
+    for param in model.parameters():
+        total_bytes += get_tensor_size_in_bytes(param)
+    for buffer in model.buffers():
+        total_bytes += get_tensor_size_in_bytes(buffer)
+    total_mb = total_bytes / 1024**2
+    return total_mb

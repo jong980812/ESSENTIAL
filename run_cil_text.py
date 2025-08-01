@@ -13,7 +13,7 @@ import os
 from functools import partial
 from pathlib import Path
 from collections import OrderedDict
-import model.modeling_finetune
+import model.modeling_finetune as modeling_finetune
 
 from mixup import Mixup
 from timm.models import create_model

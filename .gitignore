@@ -15,3 +15,9 @@ scripts/
 multinode_sh/
 **/result*/
 NIPS/
+*.txt
+*.pdf
+*.pt
+*.err
+*.pkl
+rebuttal_iccv/
