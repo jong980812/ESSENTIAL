@@ -15,10 +15,6 @@ def is_double_list(obj):
 
 
 def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,all_frames=False):
-    '''
-    num crop은 test mode 구현 안된 관계로 1로 하드코딩.
-    data_path는 cluster별로 다르기 때문에 하드코딩. 돌리기전에 Check
-    '''
     if args.data_set == 'Kinetics-400':
         if is_train is True:
             mode = 'train'
