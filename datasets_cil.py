@@ -256,7 +256,7 @@ def build_continual_dataloader(args):
             class_mask.append(list(range(0,args.classes_per_task[i])))
         else:
             class_mask.append(list(range(args.classes_per_task[i-1],args.classes_per_task[i])))
-#! video 개수 미리 세봄.
+
     for i in range(args.num_tasks):
         num = 0
         for k,v in anno_list['train'][i].items():

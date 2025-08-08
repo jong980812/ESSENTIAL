@@ -13,7 +13,6 @@ import os
 from functools import partial
 from pathlib import Path
 from collections import OrderedDict
-import model.modeling_finetune 
 import pickle
 import engine_for_cil
 from mixup import Mixup
@@ -28,24 +27,7 @@ from utils import  multiple_samples_collate
 from utils import  get_args_cil
 from utils import unfreeze_block
 import utils
-from engine_for_cil import get_model_size_in_mb,analyze_model_size
-from model.modeling_AIM import AIM
-from model.modeling_AIM_prompt import AIM_prompt
-from model.modeling_CLIP import CLIP
-from model.modeling_CLIP_custom import CLIP_custom
-from model.modeling_CLIP_spatio import CLIP_spatio
-from model.modeling_CLIP_temporal import CLIP_temporal
-from model.modeling_AIM_custom import AIM_custom
-from model.modeling_AIM_base import AIM_base
-from model.modeling_AIM_base_decoder import AIM_base_decoder
-from model.modeling_AIM_base_frame_order import AIM_base_frame_order
-from model.modeling_AIM_global_task import AIM_global_task
-from model.modeling_AIM_final import AIM_final
-from model.modeling_AIM_flops import AIM_final_flops
-from model.modeling_AIM_my import AIM_my
-from model.modeling_AIM_final_vmae import AIM_final_vmae
-from model.modeling_AIM_final_class_task import AIM_final_class_task
-# import model.modelling_vmae
+from model.CLIP_model import CLIPs
 import genetic
 import random
 def get_class_mask(args):
@@ -229,7 +211,6 @@ def get_args_cil():
 
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
 
-    #! Our Argument는 여기다가
     
     parser.add_argument('--unfreeze_layers', default=None, nargs='+', type=str)
     parser.add_argument('--adapter_layers', default=[0,1,2,3,4,5,6,7,8,9,10,11], nargs='+', type=int)
@@ -283,7 +264,6 @@ def get_args_cil():
     parser.add_argument('--ssv2_first_finetune', default=None, type=str)
     parser.add_argument('--get_frame_index', action='store_true', default=False, help='')
     parser.add_argument('--fs_topk', default=8, type=int)
-    parser.add_argument('--n_token_rehearsal', default=8, type=int)
     parser.add_argument('--debugging', action='store_true', default=False)#! No train 
     parser.add_argument('--handcrafted_selection', action='store_true', default=False)
     parser.add_argument('--selected_selection', action='store_true', default=False)
@@ -294,19 +274,16 @@ def get_args_cil():
     #! frame selection in last epoch
     parser.add_argument('--set_selection_frame', action='store_true', default=False)
     parser.add_argument('--sample_selection', action='store_true', default=False)
-    parser.add_argument('--uniform_ratio', default=0.5, type=float)
     parser.add_argument('--rehearsal_samples_per_class', default=20, type=int)
     parser.add_argument('--replay_token', default=False, action='store_true')
     parser.add_argument('--no_valid', default=False, action='store_true')
     parser.add_argument('--no_training', default=False, action='store_true')
     parser.add_argument('--no_rehearsal', default=False, action='store_true')
     parser.add_argument('--frame_making', default=False, action='store_true')
-    parser.add_argument('--k400_first_finetune', default=None, type=str)
 
     parser.add_argument('--len_prompt', default=8, type=int)
-    parser.add_argument('--origin_weight', default=1.0, type=float)
-    parser.add_argument('--frame_matching_weight', default=1.0, type=float)
-    parser.add_argument('--token_matching_weight', default=1.0, type=float)
+    parser.add_argument('--static_matching_weight', default=1.0, type=float)
+    parser.add_argument('--temporal_matching_weight', default=1.0, type=float)
     parser.add_argument('--virtual_weight', default=1.0, type=float)
     parser.add_argument('--frame_matching', default=False, action='store_true')
     parser.add_argument('--token_matching', default=False, action='store_true')
@@ -315,7 +292,7 @@ def get_args_cil():
     parser.add_argument('--memory_mode', default='task', type=str)
     parser.add_argument('--fine_tune_path', default=None, type=str)
     parser.add_argument('--base_tuning', default=False, action='store_true')
-    parser.add_argument('--TA', default=False, action='store_true')
+    parser.add_argument('--Temporal_adaptation', default=False, action='store_true')
     parser.add_argument('--tsne', default=False, action='store_true')
     parser.add_argument('--imagenet', default=False, action='store_true')
 
@@ -361,7 +338,6 @@ def main(args, ds_init):
         args.nb_classes = 51
     else:
         raise ValueError('Unsupported dataset')
-    args.n_videos = []
         
     args.n_videos = []
     if utils.get_rank() == 0 and args.log_dir is not None:
@@ -383,8 +359,7 @@ def main(args, ds_init):
     class_mask = get_class_mask(args)#! 모델에서 head 만들기 위해 미리 가져옴.
 
 
-    if args.model == 'AIM':
-        model = AIM(
+    model = CLIPs(
             input_resolution=224,
             patch_size=16,
             num_frames=args.num_frames,
@@ -400,372 +375,18 @@ def main(args, ds_init):
             class_mask=class_mask,
             args=args
         )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-        # check = torch.load('/data/jong980812/project/cil/videoCIL/result/lp/ssv2/AIM/109_dim1_50epoch_24/OUT/checkpoint/task10_epoch_50_checkpoint.pth','cpu')['model']
-        # print(model.load_state_dict(check))
-    elif args.model == 'AIM_final_flops':
-        model = AIM_final_flops(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-            
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            model.freeze_all_associ()
-            model.unfreeze_current_associ(0)#! first associ learning
-    elif args.model == 'AIM_final':
-        model = AIM_final(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-            
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            model.freeze_all_associ()
-            model.unfreeze_current_associ(0)#! first associ learning
-    elif args.model == 'AIM_final_class_task':
-        model = AIM_final_class_task(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-            
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            model.freeze_all_associ()
-            model.unfreeze_current_associ(0)#! first associ learning
-    elif args.model == 'AIM_final_vmae':
-        videomae = create_model(
-            "vit_base_patch16_224",
-            pretrained=False,
-            num_classes=args.nb_classes,
-            all_frames=args.num_frames * args.num_segments,
-            tubelet_size=args.tubelet_size,
-            fc_drop_rate=args.fc_drop_rate,
-            drop_rate=args.drop,
-            drop_path_rate=args.drop_path,
-            attn_drop_rate=args.attn_drop_rate,
-            drop_block_rate=None,
-            use_checkpoint=args.use_checkpoint,
-            use_mean_pooling=args.use_mean_pooling,
-            init_scale=args.init_scale,
-        )
-
-        patch_size = videomae.patch_embed.patch_size
-        print("Patch size = %s" % str(patch_size))
-        args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
-        args.patch_size = patch_size
-
-        if args.finetune:
-            if args.finetune.startswith('https'):
-                checkpoint = torch.hub.load_state_dict_from_url(
-                    args.finetune, map_location='cpu', check_hash=True)
-            else:
-                checkpoint = torch.load(args.finetune, map_location='cpu')
-
-            print("Load ckpt from %s" % args.finetune)
-            checkpoint_model = None
-            for model_key in args.model_key.split('|'):
-                if model_key in checkpoint:
-                    checkpoint_model = checkpoint[model_key]
-                    print("Load state_dict by model_key = %s" % model_key)
-                    break
-            if checkpoint_model is None:
-                checkpoint_model = checkpoint
-            state_dict = videomae.state_dict()
-            for k in ['head.weight', 'head.bias']:
-                if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                    print(f"Removing key {k} from pretrained checkpoint")
-                    del checkpoint_model[k]
-
-            all_keys = list(checkpoint_model.keys())
-            new_dict = OrderedDict()
-            for key in all_keys:
-                if key.startswith('backbone.'):
-                    new_dict[key[9:]] = checkpoint_model[key]
-                elif key.startswith('encoder.'):
-                    new_dict[key[8:]] = checkpoint_model[key]
-                else:
-                    new_dict[key] = checkpoint_model[key]
-            checkpoint_model = new_dict
-
-            # interpolate position embedding
-            if 'pos_embed' in checkpoint_model:
-                pos_embed_checkpoint = checkpoint_model['pos_embed']
-                embedding_size = pos_embed_checkpoint.shape[-1] # channel dim
-                num_patches = videomae.patch_embed.num_patches # 
-                num_extra_tokens = videomae.pos_embed.shape[-2] - num_patches # 0/1
-
-                # height (== width) for the checkpoint position embedding 
-                orig_size = int(((pos_embed_checkpoint.shape[-2] - num_extra_tokens)//(args.num_frames // videomae.patch_embed.tubelet_size)) ** 0.5)
-                # height (== width) for the new position embedding
-                new_size = int((num_patches // (args.num_frames // videomae.patch_embed.tubelet_size) )** 0.5)
-                # class_token and dist_token are kept unchanged
-                if orig_size != new_size:
-                    print("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size))
-                    extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-                    # only the position tokens are interpolated
-                    pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-                    # B, L, C -> BT, H, W, C -> BT, C, H, W
-                    pos_tokens = pos_tokens.reshape(-1, args.num_frames // videomae.patch_embed.tubelet_size, orig_size, orig_size, embedding_size)
-                    pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-                    pos_tokens = torch.nn.functional.interpolate(
-                        pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
-                    # BT, C, H, W -> BT, H, W, C ->  B, T, H, W, C
-                    pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(-1, args.num_frames // videomae.patch_embed.tubelet_size, new_size, new_size, embedding_size) 
-                    pos_tokens = pos_tokens.flatten(1, 3) # B, L, C
-                    new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-                    checkpoint_model['pos_embed'] = new_pos_embed
-
-            utils.load_state_dict(videomae, checkpoint_model, prefix=args.model_prefix)
-        model = AIM_final_vmae(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args,
-            videomae=videomae.to(device)
-        )
-        num_layers = model.layers
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-            
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            model.freeze_all_associ()
-            model.unfreeze_current_associ(0)#! first associ learning
-    elif args.model == 'AIM_global_task':
-        model = AIM_global_task(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-            
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            model.freeze_all_associ()
-            model.unfreeze_current_associ(0)#! first associ learning
-            # print('unfreeze list :', unfreeze_list)
-    elif args.model == 'AIM_my':
-        model = AIM_my(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-    elif args.model == 'AIM_prompt':
-        model = AIM_prompt(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-    elif args.model == 'AIM_base_decoder':
-        model = AIM_base_decoder(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            adapter_layers=args.adapter_layers,
-            class_mask=class_mask,
-            args=args
-        )
-        num_layers = model.layers
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-            
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
+    num_layers = model.layers
+    if args.use_aim_weight is not None:
+        weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
+        del weight['head.weight']
+        del weight['head.bias']
+        print(model.load_state_dict(weight,False))
         
-    elif args.model == 'CLIP':
-        model = CLIP(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            args=args
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
-        if args.use_aim_weight is not None:
-            weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
-            del weight['head.weight']
-            del weight['head.bias']
-            print(model.load_state_dict(weight,False))
-            
-    elif args.model == 'CLIP_temporal':
-        model = CLIP_temporal(
-            input_resolution=224,
-            patch_size=16,
-            num_frames=args.num_frames,
-            width=768,
-            layers=12,
-            heads=12,
-            drop_path_rate=0.2,
-            adapter_scale=0.5,
-            num_classes=args.nb_classes,
-            dim_mlp=args.dim_mlp,
-            init_scale=args.init_scale,
-            args = args
-        )
-        num_layers = model.layers
-        n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        if args.unfreeze_layers is not None:
-            model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
-            print('unfreeze list :', unfreeze_list)
+    n_parameters_before_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if args.unfreeze_layers is not None:
+        model, unfreeze_list = unfreeze_block(model,args.unfreeze_layers)
+        model.freeze_all_MR()
+        model.unfreeze_MR(0)
 
 
 
@@ -790,8 +411,6 @@ def main(args, ds_init):
     n_parameters_after_freeze = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('*******Number of params before freeze*******:', n_parameters_before_freeze)
     print('*******Number of params after freeze*******:', n_parameters_after_freeze)
-    # analyze_model_size(model)
-    # analyze_model_size(model.associator[0])
     total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
     args.lr = args.lr * total_batch_size / 256
     args.min_lr = args.min_lr * total_batch_size / 256
@@ -803,14 +422,6 @@ def main(args, ds_init):
 
 
         
-
-
-
-
-    # if args.layer_decay < 1.0:
-    #     assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
-    # else:
-    #     assigner = None
 
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
@@ -858,31 +469,7 @@ def main(args, ds_init):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
 
-    if args.data_set == 'CIFAR100':
-        args.data_set = 'Split-CIFAR100'
-        data_loader, class_mask,n_vids,_ =build_image_dataloader(args)
-    else:
-        data_loader, class_mask,n_vids,_ = build_continual_dataloader(args)
-    print("****Genetic******")
-    # from dataset.ssv2 import SSVideoClsDataset
-    # genetic_dataset = SSVideoClsDataset(
-    #         anno_path='/data/jong980812/project/cil/videoCIL/data/ssv2/annotation/val.csv',
-    #         data_path='/',
-    #         mode='validation',
-    #         clip_len=1,
-    #         num_segment=args.num_frames,
-    #         test_num_segment=args.test_num_segment,
-    #         test_num_crop=args.test_num_crop,
-    #         num_crop=1,
-    #         keep_aspect_ratio=True,
-    #         crop_size=args.input_size,
-    #         short_side_size=args.short_side_size,
-    #         new_height=256,
-    #         new_width=320,
-    #         args=args)
-    # path = '/local_datasets/something-something/something-something-v2-mp4/95557.mp4'
-    # optimized_order = genetic.genetic_algorithm(genetic_dataset,path,172,model, 10, 384, 24,0.,args)
-    # print("최적화된 프레임 순서:", optimized_order)
+    data_loader, class_mask,n_vids,_ = build_continual_dataloader(args)
  #!************ Information *************
     print()
     print("="*40)
@@ -902,16 +489,10 @@ def main(args, ds_init):
     print("="*40)
 #!************ Information *************
 
-    if args.debugging:
-        from engine_for_debug import train_and_evaluate
-    elif 'AIM_final' in args.model or args.model=='AIM_global_task':
-        from engine_for_cil import train_and_evaluate
-    else:
-        from engine_for_cil_base import train_and_evaluate
-        
-    # if args.finetune is not None:
-    #     check = torch.load(args.finetune,'cpu')['model']
-    #     print(model.module.load_state_dict(check))
+
+    from engine_for_cil import train_and_evaluate
+
+    
     train_and_evaluate(model, model_without_ddp,
                     criterion, data_loader, optimizer,
                     device, class_mask, args,loss_scaler, args.inference)

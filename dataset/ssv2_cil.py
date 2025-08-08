@@ -42,7 +42,6 @@ class SSVideoClsDataset(Dataset):
         self.get_val_sample = False
         self.set_selection_frame = False
         self.frame_sample_rate = frame_sample_rate
-        self.uniform_ratio = args.uniform_ratio
         self.task_id = task_id
         if self.mode in ['train']:
             self.aug = True
@@ -74,8 +73,10 @@ class SSVideoClsDataset(Dataset):
 
 
 
-        if utils.is_main_process() and mode == 'train' and  args.memory_size>0 and not rehearsal:
-            # save video in rehearsal
+        if utils.is_main_process() and mode == 'train' and  args.rehearsal_samples_per_class>0 and not rehearsal:
+            #
+            #TODO vCLIMB style . If you want to use vCLIMB style, use 'memory_size' argument
+            #     
             # if (args.memory_size-len(args.memory_video_path['dataset_samples'])) > len(self.dataset_samples):
             #     args.memory_video_path['dataset_samples'] += self.dataset_samples
             #     args.memory_video_path['label_array'] += self.label_array
@@ -92,6 +93,9 @@ class SSVideoClsDataset(Dataset):
 
             #     args.memory_video_path['dataset_samples'] = dataset_samples
             #     args.memory_video_path['label_array'] = label_array
+            
+            
+            #TCD style
             n = args.rehearsal_samples_per_class
 
             label_to_indices = defaultdict(list)
@@ -180,7 +184,7 @@ class SSVideoClsDataset(Dataset):
             scale_t = 1
 
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index,uniform_ratio=self.uniform_ratio) # T H W C
+            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during training".format(sample))
@@ -210,7 +214,7 @@ class SSVideoClsDataset(Dataset):
 
         elif self.mode == 'validation':
             sample = self.dataset_samples[index]
-            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index,uniform_ratio=2.0)
+            buffer = self.loadvideo_decord(sample=sample,rehearsal=self.rehearsal,all_frames=self.all_frames,index=index)
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during validation".format(sample))
@@ -318,7 +322,7 @@ class SSVideoClsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1,uniform_ratio=0.5):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)
         if not (os.path.exists(fname)):
