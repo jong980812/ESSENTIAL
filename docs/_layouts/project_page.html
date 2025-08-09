@@ -47,22 +47,26 @@
       <div class="columns is-centered">
         <div class="column has-text-centered">
           <h1 class="title is-1 publication-title">{{ page.title }}</h1>
+          {% if page.highlight %}
+          <p style="font-size: 2.0rem; font-weight: bold; color: #df5b56;">
+            🏆 {{ page.highlight }}
+          </p>
+          {% endif %}
           {% if page.authors %}
           <div class="is-size-5 publication-authors">
-            <span class="author-block">
-              {{ page.authors }}
-            </span>
+            {% for author in page.authors %}
+              <span class="author-block">{{ author }}</span>{% unless forloop.last %}, {% endunless %}
+            {% endfor %}
           </div>
           {% endif %}
-
           {% if page.affiliations %}
           <div class="is-size-5 publication-authors">
-            <span class="author-block">
-              {{ page.affiliations }}
-            </span>
+            {% for aff in page.affiliations %}
+              <span class="author-block">{{ aff }}</span>{% unless forloop.last %}&nbsp;&nbsp; {% endunless %}
+            {% endfor %}
           </div>
           {% endif %}
-
+        <p style="font-weight: 100; color:#8d8c8c;">*</sup> Equally contributed first authors. †</sup> Corresponding author.</p>
           <div class="column has-text-centered">
             <div class="publication-links">
               <!-- PDF Link. -->
