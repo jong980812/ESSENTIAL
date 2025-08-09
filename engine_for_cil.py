@@ -24,7 +24,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
     train_stats = {}
-    # create matrix to save end-of-task accuracies 
     acc_matrix = np.zeros((args.num_tasks, args.num_tasks))
     rehearsal_stats = {}
     acc_list = []
@@ -73,10 +72,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     args=args, model=model_without_ddp, model_parameters=optimizer_params, dist_init_required=not args.distributed,
                 ) 
             else:
-
-
                 model.module.unfreeze(args.unfreeze_layers_after_base_task)
-
                 model.module.freeze_all_MR()
                 model.module.unfreeze_MR(task_id)
                 model.to(args.device)
@@ -168,9 +164,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
             print("Backbone Freeze")
             for epoch in range(args.rehearsal_epochs):
-
-
-
                 if args.no_rehearsal:
                     break
                 if (args.data_set=='SSV2') and (task_id==0):# SSv2 does not need rehearsal in first task
@@ -281,9 +274,6 @@ def train_one_epoch(model: torch.nn.Module,
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
         samples = samples.to(device, non_blocking=True)
-        # for class_index, classes in enumerate(class_mask):
-        #     for c in classes:
-        #         targets[targets == c] = class_index
         targets = targets.to(device, non_blocking=True)
         sample_task_id = sample_task_id.to('cpu').numpy()
         mask = None
@@ -322,8 +312,6 @@ def train_one_epoch(model: torch.nn.Module,
             virtual_value = args.virtual_weight*virtual_loss.item()
             loss +=args.virtual_weight*virtual_loss
 
-        # if order_loss is not None:
-        #     loss+=order_loss
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
@@ -390,7 +378,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
 
     outputs,static_matching,temporal_matching = model(samples,train=True,class_id=target,task_id=task_id,sample_task_id=sample_task_id,
                                 rehearsal = rehearsal,selected_frame=selected_frame) 
-    if (mask is not None) and (not args.each_head) and (not args.cos): #! each head이면 안됌.
+    if (mask is not None) and (not args.cos): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
         if len(outputs)==2:
@@ -435,12 +423,7 @@ def evaluate(model: torch.nn.Module,  data_loader,
                 target = batch[1]
                 vname = batch[2]          
                 videos = videos.to(device, non_blocking=True)
-                    # for class_index, classes in enumerate(all_mask):
-                    #     for c in classes:
-                    #         target[target == c] = class_index
                 target = target.to(device, non_blocking=True)
-
-                # compute output
 
                 with torch.cuda.amp.autocast():
                     frame_index,num_frames= model(videos,train=False,task_id=task_id,get_frame = True)
@@ -560,8 +543,6 @@ def save_frame_index_in_train(
         memory_video_path['label_array'].append(label)
         memory_video_path['selected_frame'].append(selected_index.tolist())
         memory_video_path['energy'].append(round(logit[0,label].item(),4))
-        # if c==10:
-        #     break
     with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'w') as file:
         json.dump(memory_video_path, file)
 @torch.no_grad()
@@ -677,18 +658,14 @@ def save_frame_index(model: torch.nn.Module,
             target = batch[1]
             vname = batch[2]          
             videos = videos.to(device, non_blocking=True)
-                # for class_index, classes in enumerate(all_mask):
-                #     for c in classes:
-                #         target[target == c] = class_index
+
             target = target.to(device, non_blocking=True)
             # compute output
             if args.data_set =='ActivityNet':
                 video_name = dict()
                 for k,v in vname.items():
                     video_name[k] = v[0]
-                # total_frames = videos.shape[2]
-                # start_ratio= round(float(video_name['t_start'][0]) / float(video_name['video_duration'][0]),5)
-                # start_frame = int(start_ratio * total_frames) 
+
             else:
                 video_name = vname[0]+('' if ((args.data_set=='UCF101') or (args.data_set=='HMDB51')) else '.mp4')
             label = int(target.cpu())
@@ -711,7 +688,7 @@ def save_frame_index(model: torch.nn.Module,
             memory_video_path['label_array'].append(label)
             memory_video_path['selected_frame'].append(selected_index.tolist())
             memory_video_path['samples_task_id'].append(task_id)
-            # print(f'Index: {frame_index}, {num_frames} {vname}')
+
     with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id+1}.txt'), 'w') as file:
             json.dump(memory_video_path, file)
     re_dataset.all_frames = False
@@ -821,61 +798,3 @@ def compute_video(lst):
     top1 = (int(pred) == int(label)) * 1.0
     top5 = (int(label) in np.argsort(-feat)[:5]) * 1.0
     return [pred, top1, top5, int(label)]
-
-
-
-
-
-
-# import torch
-
-# def print_memory(tag=""):
-#     print(f"[{tag}] Allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
-#     print(f"[{tag}] Reserved : {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
-    
-    
-# def get_model_size_in_mb(model):
-#     param_size = 0
-#     for param in model.parameters():
-#         param_size += param.numel() * param.element_size()  # element 수 × 바이트
-#     buffer_size = 0
-#     for buffer in model.buffers():
-#         buffer_size += buffer.numel() * buffer.element_size()
-#     total_size = (param_size + buffer_size) / 1024**2  # byte → MB
-#     return total_size
-# def analyze_model_size(model):
-#     total_params = 0
-#     learnable_params = 0
-#     param_size_bytes = 0
-#     buffer_size_bytes = 0
-
-#     for param in model.parameters():
-#         numel = param.numel()
-#         total_params += numel
-#         if param.requires_grad:
-#             learnable_params += numel
-#         param_size_bytes += numel * param.element_size()
-
-#     for buffer in model.buffers():
-#         buffer_size_bytes += buffer.numel() * buffer.element_size()
-
-#     total_size_mb = (param_size_bytes + buffer_size_bytes) / 1024**2
-
-#     print(f"🧮 Total parameters         : {total_params:,}")
-#     print(f"🧠 Learnable parameters     : {learnable_params:,}")
-#     print(f"💾 Model size (float32)     : {total_size_mb:.2f} MB")
-#     return total_params, learnable_params, total_size_mb
-
-# import sys
-
-# def get_tensor_size_in_bytes(tensor):
-#     return tensor.numel() * tensor.element_size()
-
-# def get_model_memory_usage(model):
-#     total_bytes = 0
-#     for param in model.parameters():
-#         total_bytes += get_tensor_size_in_bytes(param)
-#     for buffer in model.buffers():
-#         total_bytes += get_tensor_size_in_bytes(buffer)
-#     total_mb = total_bytes / 1024**2
-#     return total_mb

@@ -38,8 +38,6 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
 </div>
 
 ---
-<br>
-<br>
 
 <div style="display: flex; justify-content: center; align-items: flex-start; gap: 0px;">
   
@@ -83,6 +81,7 @@ ESSENTIAL is designed to overcome the trade-off in VCIL between **performance** 
 5. Turing showed that the Entscheidungsproblem is undecidable, meaning there is no algorithm that can determine, for any given mathematical statement, whether it is provable or not.
 
 ![Turing Machine](static/image/Training.png)
+![Turing Machine](static/image/rehearsal.png)
 
 
 ## Table: Comparison of Computable and Non-Computable Numbers

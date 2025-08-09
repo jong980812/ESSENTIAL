@@ -20,7 +20,6 @@ from timm.models import create_model
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.utils import ModelEma
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
-from image_continual import build_image_dataloader
 from datasets_cil import build_continual_dataloader
 from utils import NativeScalerWithGradNormCount as NativeScaler
 from utils import  multiple_samples_collate
@@ -28,7 +27,6 @@ from utils import  get_args_cil
 from utils import unfreeze_block
 import utils
 from model.CLIP_model import CLIPs
-import genetic
 import random
 def get_class_mask(args):
     with open(args.anno_path, 'rb') as file:
@@ -260,7 +258,6 @@ def get_args_cil():
     parser.add_argument('--ssv2_first_finetune', default=None, type=str)
     parser.add_argument('--get_frame_index', action='store_true', default=False, help='')
     parser.add_argument('--debugging', action='store_true', default=False)#! No train 
-    parser.add_argument('--handcrafted_selection', action='store_true', default=False)
     parser.add_argument('--selected_selection', action='store_true', default=False)
     parser.add_argument('--fs_density', action='store_true', default=False)
     parser.add_argument('--use_aim_weight',type=str, default=None)
@@ -408,8 +405,6 @@ def main(args, ds_init):
 
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
-    elif args.slow_learner:
-        assigner = LayerDecayValueAssigner([0.01]*(12+1)+[1.0]) # backbone + head
     else:
         assigner = None
     if assigner is not None:

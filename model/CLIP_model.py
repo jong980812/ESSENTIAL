@@ -374,15 +374,8 @@ class CLIPs(nn.Module):
         self.oracle = args.fine_tune_path
         # if args.use_aim_weight:
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
-        self.order = args.order
-        if self.order:
-            self.temp_head = nn.Linear(width, num_frames)
-            trunc_normal_(self.temp_head.weight, std=.02)
-            self.temp_head.weight.data.mul_(init_scale)
-            self.temp_head.bias.data.mul_(init_scale)
         self.temporal_layer =args.temporal_layer
         self.fs_topk = args.fs_topk
-        self.handcrafted_selection = args.handcrafted_selection
         self.selected_selection = args.selected_selection
         self.data_set = args.data_set
         if self.replay_token:
@@ -393,11 +386,6 @@ class CLIPs(nn.Module):
                 self.mr_module = nn.ModuleList([MR_module(args.temp_mode, width, None, num_frames, drop_path=drop_path_rate,fs_topk=self.fs_topk,len_sem_prompt=self.len_sem_prompt,task_id=i,mode=args.prompt_mode) for i in range(args.num_tasks)])
             elif self.memory_mode =='identity':
                 self.mr_module = nn.Identity()
-        if self.order:
-            self.temp_head = nn.Linear(self.embed_dim, num_frames)
-            trunc_normal_(self.temp_head.weight, std=.02)
-            self.temp_head.weight.data.mul_(init_scale)
-            self.temp_head.bias.data.mul_(init_scale)
         self.transformer = Transformer(num_frames, width, layers, heads, num_tadapter=2 if args.data_set=='SSV2' else 1, scale=adapter_scale, drop_path=drop_path_rate,dim_mlp=dim_mlp,adapter_layers=self.adapter_layers)
         self.decoder_cls = nn.Parameter(scale * torch.randn(width))
         self.decoder_transformer_for_cls = nn.Sequential(*[Decoder_ResidualAttentionBlock_time(args.temp_mode, width, args.temporal_heads, None,0.2, num_tadapter, num_frames, drop_path=drop_path_rate,dim_mlp=dim_mlp,fs_topk=self.fs_topk) for _ in range(args.temporal_layer)])
