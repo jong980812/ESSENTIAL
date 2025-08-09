@@ -15,10 +15,6 @@ def is_double_list(obj):
 
 
 def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,all_frames=False):
-    '''
-    num crop은 test mode 구현 안된 관계로 1로 하드코딩.
-    data_path는 cluster별로 다르기 때문에 하드코딩. 돌리기전에 Check
-    '''
     if args.data_set == 'Kinetics-400':
         if is_train is True:
             mode = 'train'
@@ -260,7 +256,7 @@ def build_continual_dataloader(args):
             class_mask.append(list(range(0,args.classes_per_task[i])))
         else:
             class_mask.append(list(range(args.classes_per_task[i-1],args.classes_per_task[i])))
-#! video 개수 미리 세봄.
+
     for i in range(args.num_tasks):
         num = 0
         for k,v in anno_list['train'][i].items():

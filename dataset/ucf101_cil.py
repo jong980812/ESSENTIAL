@@ -39,7 +39,6 @@ class UCFVideoClsDataset(Dataset):
         self.all_frames = all_frames
         self.task_id = task_id
         self.set_selection_frame = False
-        self.uniform_ratio = args.uniform_ratio
         self.rehearsal = rehearsal
         if self.mode in ['train']:
             self.aug = True
@@ -156,7 +155,7 @@ class UCFVideoClsDataset(Dataset):
 
             sample = self.dataset_samples[index]
             # buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t) # T H W C
-            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index,uniform_ratio=self.uniform_ratio) # T H W C
+            buffer = self.loadvideo_decord(sample, sample_rate_scale=scale_t,all_frames=self.set_selection_frame,index=index) # T H W C
             if len(buffer) == 0:
                 while len(buffer) == 0:
                     warnings.warn("video {} not correctly loaded during training".format(sample))
@@ -292,7 +291,7 @@ class UCFVideoClsDataset(Dataset):
         return buffer
 
 
-    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1,uniform_ratio=0.5):
+    def loadvideo_decord(self, sample, rehearsal=False,sample_rate_scale=1,all_frames=False,index=-1):
         """Load video content using Decord"""
         fname = os.path.join(self.data_path,sample)+'.avi'
         if not (os.path.exists(fname)):

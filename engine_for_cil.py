@@ -36,12 +36,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             else:
                 print(model.module.load_state_dict(check,True))
             del check
-        if args.tsne:
-            # if task_id<5:
-            #     continue
-            tsne(model=model,data_loaders=data_loader,device=device,args=args)
-            return
-        # SSv2 초반 epoch을 위해 만들어놓았지만, 현재 사용 안함.
         if task_id == 0 and args.data_set == "SSV2":
             warmup_epochs,epochs = args.warmup_epochs,args.epochs
         else:
@@ -66,12 +60,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
         print(f"Start task training for {epochs} epochs")
-
-        if args.joint:
-            if task_id< args.num_tasks-1:
-                continue
                 
-        #TODO pick best model using validation
         max_accuracy = 0.0
         if task_id > 0:
             # reinit_optimizer
@@ -85,13 +74,11 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 ) 
             else:
 
-                # if 'AIM' in args.model:
-                model.module.unfreeze(args.unfreeze_layers_after_base)
-                if 'AIM_final' in args.model:
-                    model.module.freeze_all_associ()
-                    # if not args.memory_mode=='global':
-                    #     model.module.update_from_previous_associ(task_id)
-                    model.module.unfreeze_current_associ(task_id)
+
+                model.module.unfreeze(args.unfreeze_layers_after_base_task)
+
+                model.module.freeze_all_MR()
+                model.module.unfreeze_MR(task_id)
                 model.to(args.device)
                 
                 optimizer = create_optimizer(
@@ -113,17 +100,9 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                 }
         # utils.save_on_master(state_dict, checkpoint_path)
         for epoch in range(epochs): 
-            # if args.task2_weight is not None and task_id==1:
-            #     check = torch.load(args.ssv2_first_finetune,'cpu')['model']
-            #     print(model.module.load_state_dict(check))
-            #     print('*******task2_weight is applied***********')
-            #     del check
-            #     break
-            # if ('task1_epoch_20_checkpoint.pth' in args.ssv2_first_finetune) and (epoch<20):
-            #     continue
-            if args.ssv2_first_finetune is not None and (task_id<1):
+            if args.ssv2_first_finetune is not None and (task_id<1): # we can skip the first task if you have first_finetune pth.
                 break
-            if args.joint or args.inference or args.debugging or args.no_training:
+            if args.inference or args.debugging or args.no_training:
                 break
 
             if args.distributed:
@@ -153,7 +132,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                         }
                 utils.save_on_master(state_dict, checkpoint_path)
 
-        #! Saving CLS TOken*****************************************************************************
+        #! Saving semantic prompts*****************************************************************************
         if args.get_frame_index:
             if utils.is_main_process():
                 save_frame_index(model=model,data_loader=data_loader,device = device, task_id=task_id, class_mask = None, args = args)
@@ -163,14 +142,8 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         #! *****************************************************************************
         
         #? ************************ Rehearsal *************************************
-        if args.memory_size > 0 and not args.inference:# and task_id > 0:
-            # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
-            # print(unfreeze_list)
-            # print('Freeze for rehearsal')
-                   # lr scehdule
-            # model.module.unfreeze(args.unfreeze_layers_rehearsal)
-            if 'AIM_final' in args.model:
-                model.module.freeze_all_associ()
+        if args.rehearsal_samples_per_class > 0 and not args.inference:# and task_id > 0:
+            model.module.freeze_all_MR()
             optimizer = create_optimizer(
             args, model_without_ddp, skip_list=args.skip_weight_decay_list,
             get_num_layer=args.assigner.get_layer_id if args.assigner is not None else None, 
@@ -194,18 +167,13 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
             print(f"Start rehearsal training for {args.rehearsal_epochs} epochs")
             print("Backbone Freeze")
-            if not args.model=='AIM_final_vmae':
-                model.module.transformer.eval()
-                model.module.conv1.eval()
-            if args.model=='AIM_final_vmae':
-                model.module.videomae.eval()
             for epoch in range(args.rehearsal_epochs):
 
 
 
                 if args.no_rehearsal:
                     break
-                if (args.data_set=='SSV2') and (task_id==0):# and (not args.use_aim_weight):
+                if (args.data_set=='SSV2') and (task_id==0):# SSv2 does not need rehearsal in first task
                     break 
                 if args.distributed:
                     data_loader[task_id]['rehearsal'].sampler.set_epoch(epoch) 
@@ -224,9 +192,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
         if args.no_valid:
             continue
-        # continue
-        # pre = torch.load(f'/data/jong980812/project/cil/videoCIL/NIPS/AIM_my/rehearsal_use_virtual/OUT/checkpoint/task{task_id+1}_checkpoint.pth')
-        # model.module.load_state_dict(pre['model'],strict = True)
+
         val_stats = evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                     task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=False)
         acc_list.append(val_stats['stat_matrix'].tolist())
@@ -274,7 +240,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
     print('test')
     evaluate_till_now(model=model, data_loader=data_loader, device=device, 
                                 task_id=task_id, class_mask=class_mask, acc_matrix=acc_matrix, args=args,test_mode=True)
-    #! SSV2 는 필요함.
     if utils.is_main_process():
         print('Average Incremental Accuracy (VAL)')
         print_matrix_with_aligned_averages(acc_list,args.n_videos)
@@ -287,7 +252,6 @@ def train_one_epoch(model: torch.nn.Module,
                     set_training_mode=True, task_id=-1, class_mask=None, args = None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
                     num_training_steps_per_epoch=None, update_freq=None,header=None,loss_scaler=None, rehearsal = False,
-                    frame_making=False
                     ):
 
     model.train(set_training_mode)
@@ -321,6 +285,7 @@ def train_one_epoch(model: torch.nn.Module,
         #     for c in classes:
         #         targets[targets == c] = class_index
         targets = targets.to(device, non_blocking=True)
+        sample_task_id = sample_task_id.to('cpu').numpy()
         mask = None
         if class_mask is not None:
             if rehearsal:
@@ -330,11 +295,6 @@ def train_one_epoch(model: torch.nn.Module,
                     # mask.append(i)
             else:
                 mask = class_mask[task_id]
-        #!!!각 마스크 첫번째 값 빼줘서 target 범위를 0~ 으로 맞춰줌.
-        if args.each_head and not rehearsal:
-            first_class = mask[0]
-            targets = targets-first_class
-        #!!!
         if args.mixup_fn is not None:
             samples, targets = args.mixup_fn(samples, targets)
             
@@ -344,20 +304,19 @@ def train_one_epoch(model: torch.nn.Module,
             model, samples, targets, criterion,mask,task_id,args,device)
         else:
             with torch.cuda.amp.autocast():
-                loss,frame_matching,token_matching,virtual_loss, output= train_class_batch(
+                loss,static_matching,temporal_matching,virtual_loss, output= train_class_batch(
                 model, samples, targets, criterion,mask,task_id,sample_task_id,args,device,
-                rehearsal,
-                frame_making,indices)
+                rehearsal,indices)
         if loss is None:
             loss = torch.tensor(0.).to(device)
-        loss_value = args.origin_weight*loss.item()
-        if frame_matching is not None:
-            frame_matching_value = args.frame_matching_weight*frame_matching.item()
-            loss +=args.frame_matching_weight*frame_matching
+        loss_value =loss.item()
+        if static_matching is not None:
+            static_matching_value = args.static_matching_weight*static_matching.item()
+            loss +=args.static_matching_weight*static_matching
             
-        if token_matching is not None:
-            token_matching_value = args.token_matching_weight*token_matching.item()
-            loss +=args.token_matching_weight*token_matching
+        if temporal_matching is not None:
+            temporal_matching_value = args.temporal_matching_weight*temporal_matching.item()
+            loss +=args.temporal_matching_weight*temporal_matching
             
         if virtual_loss is not None:
             virtual_value = args.virtual_weight*virtual_loss.item()
@@ -390,7 +349,7 @@ def train_one_epoch(model: torch.nn.Module,
 
         torch.cuda.synchronize()
 
-        if args.mixup_fn is None and not frame_making:
+        if args.mixup_fn is None:
             class_acc = (output.max(-1)[-1] == targets).float().mean()
         else:
             class_acc = None
@@ -398,8 +357,8 @@ def train_one_epoch(model: torch.nn.Module,
             
         metric_logger.update(origin_loss=loss_value)
         metric_logger.update(virtual_loss=virtual_value) if virtual_loss is not None else None
-        metric_logger.update(frame_matching=frame_matching_value) if frame_matching is not None else None 
-        metric_logger.update(token_matching=token_matching_value) if token_matching is not None else None 
+        metric_logger.update(static_matching=static_matching_value) if static_matching is not None else None 
+        metric_logger.update(temporal_matching=temporal_matching_value) if temporal_matching is not None else None 
         # metric_logger.update(order=order_loss.item()) if order_loss is not None else None 
         # metric_logger.update(cls_aug_loss=cls_aug_loss.item()) if cls_aug_loss is not None else None 
         # metric_logger.update(debias=debias_loss.item()) if debias_loss is not None else None
@@ -427,16 +386,10 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal,frame_making,selected_frame):
-    
-    # if args.each_head:
-    # first_class = mask[0]
-    # if args.order:
-    outputs,frame_matching,token_matching = model(samples,train=True,class_id=target,task_id=task_id,sample_task_id=sample_task_id,
-                                rehearsal = rehearsal,frame_making=frame_making,selected_frame=selected_frame) 
-    # else:
-    #     outputs,_= model(samples,train=True,task_id=task_id)
+def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal,selected_frame):
 
+    outputs,static_matching,temporal_matching = model(samples,train=True,class_id=target,task_id=task_id,sample_task_id=sample_task_id,
+                                rehearsal = rehearsal,selected_frame=selected_frame) 
     if (mask is not None) and (not args.each_head) and (not args.cos): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
@@ -446,7 +399,6 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
             if virtual is not None:virtual = virtual.index_fill(dim=1, index=not_mask, value=float('-inf'))
         else:
             outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-inf'))
-    target = target#-first_class
     if args.cos:
         if len(outputs)==2:
             origin,virtual = outputs[0],outputs[1]
@@ -461,134 +413,14 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
         else:
             loss = criterion(outputs, target)
     
-    if args.debias:
-        shuffled_indices = np.random.permutation(samples.shape[2])
-        shuffled_inputs = samples[:, :,shuffled_indices]
-        shuffled_outputs,_= model(shuffled_inputs,train=True,task_id=task_id)
-        debias_loss = -torch.mean(torch.sum(torch.nn.functional.log_softmax(shuffled_outputs, dim=1) 
-                * torch.ones(shuffled_outputs.shape[0], args.nb_classes, device=shuffled_inputs.device) 
-                / args.nb_classes, dim=1))
-        loss = loss + debias_loss
-    if args.order:
-        shuffled_indices = np.random.permutation(samples.shape[2])
-        shuffled_inputs = samples[:, :,shuffled_indices]
-        _,x_final = model(shuffled_inputs,train=True,task_id=task_id)
-        B, T = x_final.shape[:2]
-        t_label = torch.LongTensor(shuffled_indices).unsqueeze(0).repeat(B,1).to(args.device)
-        order_loss = criterion(x_final.view(B*T, -1), t_label.view(-1))
-        # TODO mixup
-        # outputs = outputs.index_fill(dim=1, index=not_mask, value=float('-1e4'))
-        # target = target.index_fill(dim=1, index=not_mask, value=int(0))
-        # loss = loss + order_loss
   
         
-    return loss,(frame_matching),token_matching,(loss_virtual), origin
+    return loss,(static_matching),temporal_matching,(loss_virtual), origin
 
 
 def get_loss_scale_for_deepspeed(model):
     optimizer = model.optimizer
     return optimizer.loss_scale if hasattr(optimizer, "loss_scale") else optimizer.cur_scale
-
-@torch.no_grad()
-def tsne(model: torch.nn.Module,  data_loaders, 
-            device, task_id=-1,all_mask = None, class_mask=None, args=None,header=None,til=False
-            ,selector = None,get_all_frame=False):
-
-    # 원하는 경로
-    model.eval()
-    import pickle
-    with torch.no_grad():
-        path = f"{args.output_dir}/t_sne/tcd_ssv2_train"
-        if not os.path.exists(path):
-            os.makedirs(path)
-            print(f"경로 '{path}'가 생성되었습니다.")
-        else:
-            print(f"경로 '{path}'는 이미 존재합니다.")
-        for i in range(1,args.num_tasks):
-            if args.fine_tune_path is not None:
-                check = torch.load(os.path.join(args.fine_tune_path,f'task{i+1}_checkpoint.pth'),'cpu')['model']
-                print(model.module.load_state_dict(check,True))
-            matching_losses = []
-            # 경로가 없을 경우 생성
-            data_loader= data_loaders[i]['train']
-            masked_token_list = []
-            pstatic_list = []
-            unmasked_list = []
-            cls_origin_list =[]
-            cls_virtual_list =[]
-            cls_sparse_list =[]
-            n_sample = len(data_loader.dataset)
-            # act_matrix.append(model(image).squeeze().cpu().detach().numpy()) #128 * 1000
-            for j,batch in enumerate(data_loader):
-                videos = batch[0]
-                target = batch[1]            
-                videos = videos.to(device, non_blocking=True)
-                    # for class_index, classes in enumerate(all_mask):
-                    #     for c in classes:
-                    #         target[target == c] = class_index
-                target = target.to(device, non_blocking=True)
-                print(f'Task {i}: {j*videos.shape[0]}/{n_sample}')
-                # compute output
-                
-                with torch.cuda.amp.autocast():
-                    # selection = selector(videos)
-                    # selection_results = selection.argmax(1)#(B)
-                    # if args.order:
-                    # tokens = model.module.get_cls_tokens(videos)
-                    output,frame_matching_loss,tokens,video_tokens = model(x=videos,task_id=i,inference=True)
-                    cls_origin,cls_virtual,cls_sparse = video_tokens
-                    tokens= tokens.permute(1,0,2)
-                    # print(torch.functional.F.pairwise_distance(cls_origin,cls_virtual,p=2).mean())
-                    new_tokens_list = []
-                    for b in range(tokens.shape[0]):
-    # 랜덤한 두 개의 인덱스를 선택합니다.
-                        random_indices = np.sort(np.random.choice(range(8),4,False))#random.sample(range(8), 4)
-                        
-                        # 선택된 인덱스에 해당하는 텐서를 추출합니다.
-                        selected_tokens = tokens[b, random_indices, :]
-                        
-                        # 리스트에 추가합니다.
-                        new_tokens_list.append(selected_tokens)
-
-                    # 리스트를 텐서로 변환합니다.
-                    masked_token = torch.stack(new_tokens_list)#.mean(1)
-                    unmasked_token = tokens#.mean(1)
-                    # print(np.linalg.norm(s_feature - s_masked_feature, axis=1))
-                    # output,frame_matching_loss,tokens = model(x=videos,task_id=i,inference=True)
-                    
-                    pstatic =output[1].permute(1,0,2)#.mean(1)
-                    
-                    
-                    masked_token_list.append(masked_token.cpu().detach().numpy())
-                    pstatic_list.append(pstatic.cpu().detach().numpy())
-                    unmasked_list.append(unmasked_token.cpu().detach().numpy())
-                    matching_losses.append(frame_matching_loss.item())
-                    # cls_origin_list.append(cls_origin.cpu().detach().numpy())
-                    # cls_virtual_list.append(cls_virtual.cpu().detach().numpy())
-                    # cls_sparse_list.append(cls_sparse.cpu().detach().numpy())
-            masked_token_list = np.concatenate(masked_token_list, axis=0)
-            pstatic_list = np.concatenate(pstatic_list, axis=0)
-            unmasked_list = np.concatenate(unmasked_list, axis=0)
-            # cls_origin_list = np.concatenate(cls_origin_list, axis=0)
-            # cls_virtual_list = np.concatenate(cls_virtual_list, axis=0)
-            # cls_sparse_list = np.concatenate(cls_sparse_list, axis=0)
-            # unmasked_list = np.concatenate(unmasked_list, axis=0)
-            with open(os.path.join(path,f"{i}_all_masked"), 'wb') as f:
-                pickle.dump(masked_token_list, f)
-            with open(os.path.join(path,f"{i}_all_pstatic"), 'wb') as f:
-                pickle.dump(pstatic_list, f)
-            with open(os.path.join(path,f"{i}_all_unmasked"), 'wb') as f:
-                pickle.dump(unmasked_list, f)
-            # with open(os.path.join(path,f"{i}_all_cls_origin"), 'wb') as f:
-            #     pickle.dump(cls_origin_list, f)
-            # with open(os.path.join(path,f"{i}_all_cls_virtual"), 'wb') as f:
-            #     pickle.dump(cls_virtual_list, f)
-            # with open(os.path.join(path,f"{i}_all_cls_sparse"), 'wb') as f:
-            #     pickle.dump(cls_sparse_list, f)
-            print(np.mean(matching_losses))
-            # with open(f"{args.output_dir}/t_sne/{i}_unmasked", 'wb') as f:
-            #     pickle.dump(unmasked_list, f)
-    exit
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module,  data_loader, 
@@ -621,39 +453,24 @@ def evaluate(model: torch.nn.Module,  data_loader,
             videos = batch[0]
             target = batch[1]            
             videos = videos.to(device, non_blocking=True)
-                # for class_index, classes in enumerate(all_mask):
-                #     for c in classes:
-                #         target[target == c] = class_index
             target = target.to(device, non_blocking=True)
 
             # compute output
 
             with torch.cuda.amp.autocast():
-                # selection = selector(videos)
-                # selection_results = selection.argmax(1)#(B)
-                # if args.order:
-                logits,frame_loss = model(videos,train=False,task_id=None,inference = True)
+                logits,_ = model(videos,train=False,task_id=None,inference = True)
                 logits = logits[0]
-                # else:
-                
-                # logits = model(videos,task_id,None) if til  else model(videos,train=False,task_id=task_id)
-                       
-                # if til:
-                #     not_mask = np.setdiff1d(np.arange(args.nb_classes), class_mask)
-                #     not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
-                #     logits = logits.index_fill(dim=1, index=not_mask, value=float('-inf'))
                 loss = criterion(logits, target)
 
             acc1, acc5 = accuracy(logits, target, topk=(1, 5))
-            # metric_logger.meters['Frame_matching'].update(frame_loss.item())
             metric_logger.meters['Loss'].update(loss.item())
             metric_logger.meters['Acc@1'].update(acc1.item(), n=videos.shape[0])
             metric_logger.meters['Acc@5'].update(acc5.item(), n=videos.shape[0])
             
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'#frame loss {frame_matching.global_avg:.3f}'
-          .format(top1=metric_logger.meters['Acc@1'], top5=metric_logger.meters['Acc@5'], losses=metric_logger.meters['Loss'])),#frame_matching=metric_logger.meters['Frame_matching']))
+    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'#frame loss {static_matching.global_avg:.3f}'
+          .format(top1=metric_logger.meters['Acc@1'], top5=metric_logger.meters['Acc@5'], losses=metric_logger.meters['Loss'])),#static_matching=metric_logger.meters['static_matching']))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -665,7 +482,6 @@ def evaluate_till_now(model: torch.nn.Module, data_loader,
     import random
     num_task = args.num_tasks
     for i in range(task_id+1):
-        #! til은 adapter selection 하기 위함.
         mask = class_mask[i]
         if get_all_frame:
             header = 'Frame_index: [Task {}]'.format(i + 1)
@@ -734,9 +550,6 @@ def save_frame_index_in_train(
         target = batch[1]
         vname = batch[2]          
         videos = videos.to(device, non_blocking=True)
-            # for class_index, classes in enumerate(all_mask):
-            #     for c in classes:
-            #         target[target == c] = class_index
         target = target.to(device, non_blocking=True)
         video_name = vname[0]+'.mp4'
         label = int(target.cpu())
@@ -762,14 +575,12 @@ def save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask):
         with open(os.path.join(args.output_dir,f'selected_frame_task_{task_id+1}.txt'), 'r') as file:
             selected_frame = json.load(file)
         for idx, label in enumerate(selected_frame['label_array']):
-            # 각 label에 해당하는 정보들을 하나의 딕셔너리로 묶어서 저장
             entry = {
                 'sample': selected_frame['dataset_samples'][idx],
                 'selected_frame': selected_frame['selected_frame'][idx],
                 'energy': selected_frame['energy'][idx]
             }
             label_groups[label].append(entry)
-        # 각 그룹별로 energy 기준 상위 N개를 추출합니다.
     else:
         for task in range(task_id+1):
             if task<task_id:
@@ -779,7 +590,6 @@ def save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask):
                 with open(os.path.join(args.output_dir,f'selected_frame_task_{task+1}.txt'), 'r') as file:
                     selected_frame = json.load(file)
             for idx, label in enumerate(selected_frame['label_array']):
-                # 각 label에 해당하는 정보들을 하나의 딕셔너리로 묶어서 저장
                 entry = {
                     'sample': selected_frame['dataset_samples'][idx],
                     'selected_frame': selected_frame['selected_frame'][idx],
@@ -792,7 +602,6 @@ def save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask):
     print(f'Class num: {class_num}')
     print(f'Memory per class: {save_num}')
     for label, entries in label_groups.items():
-        # 각 label에서 energy가 가장 높은 상위 N개를 선택
         top_entries = heapq.nlargest(save_num, entries, key=lambda x: x['energy'])
         if len(top_entries)<save_num:
             print("error")
@@ -805,8 +614,8 @@ def save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask):
             total_items = sum(len(items) for items in new_memory.values())
             print(f"After_calibraing: {total_items}")
             break
-        random_label = random.choice(labels_with_full_save_num)  # 무작위로 하나의 레이블 선택
-        new_memory[random_label].pop()  # 선택된 레이블에서 마지막 항목 제거
+        random_label = random.choice(labels_with_full_save_num)  #
+        new_memory[random_label].pop()  
         total_items -= 1
     print("\n\nSample num per Class:")
     for label, items in new_memory.items():
@@ -816,14 +625,13 @@ def save_rehearsal_from_selected_frame_in_training(args,task_id,class_mask):
     label_array = []
     selected_frame = []
     energy = []
-    # 각 레이블의 항목을 순회하며 리스트를 구성
+
     for label, items in new_memory.items():
         for item in items:
             dataset_samples.append(item['sample'])
             label_array.append(int(label))  # 'label1'에서 숫자만 추출
             selected_frame.append(item['selected_frame'])
             energy.append(item['energy'])
-    # 모든 데이터를 하나의 딕셔너리로 결합
     structured_data = {
         'dataset_samples': dataset_samples,
         'label_array': label_array,
@@ -840,9 +648,6 @@ def save_frame_index(model: torch.nn.Module,
                     class_mask=None, 
                     args=None,
                     ):
-    '''
-    task_id 들어오면 해당 txt읽어야함.
-    '''
     if task_id!=0:
         with open(os.path.join(args.output_dir,f'rehearsal_task_{task_id}.txt'), 'r') as file:
             a = json.load(file)
@@ -853,7 +658,7 @@ def save_frame_index(model: torch.nn.Module,
     memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[],'samples_task_id':[]}
     model.eval()
     re_dataset = data_loader[task_id]['rehearsal'].dataset
-    re_dataset.all_frames = True
+    # re_dataset.all_frames = True
     num_tasks = 1#utils.get_world_size()
     global_rank = utils.get_rank()
     sampler_rehearsal = torch.utils.data.DistributedSampler(re_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True)
@@ -862,7 +667,7 @@ def save_frame_index(model: torch.nn.Module,
                 batch_size=1,#!
                 num_workers=args.num_workers,
                 pin_memory=args.pin_mem,
-                drop_last=False if len(re_dataset)<args.batch_size*utils.get_world_size() else True,#total batch가 rehearsal보다 크면 .
+                drop_last=False if len(re_dataset)<args.batch_size*utils.get_world_size() else True,
             )
     header = 'Saving Frame Index: [Task {} Rehearsal Loader]'.format(task_id + 1)
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -1022,55 +827,55 @@ def compute_video(lst):
 
 
 
-import torch
+# import torch
 
-def print_memory(tag=""):
-    print(f"[{tag}] Allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
-    print(f"[{tag}] Reserved : {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
+# def print_memory(tag=""):
+#     print(f"[{tag}] Allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+#     print(f"[{tag}] Reserved : {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     
     
-def get_model_size_in_mb(model):
-    param_size = 0
-    for param in model.parameters():
-        param_size += param.numel() * param.element_size()  # element 수 × 바이트
-    buffer_size = 0
-    for buffer in model.buffers():
-        buffer_size += buffer.numel() * buffer.element_size()
-    total_size = (param_size + buffer_size) / 1024**2  # byte → MB
-    return total_size
-def analyze_model_size(model):
-    total_params = 0
-    learnable_params = 0
-    param_size_bytes = 0
-    buffer_size_bytes = 0
+# def get_model_size_in_mb(model):
+#     param_size = 0
+#     for param in model.parameters():
+#         param_size += param.numel() * param.element_size()  # element 수 × 바이트
+#     buffer_size = 0
+#     for buffer in model.buffers():
+#         buffer_size += buffer.numel() * buffer.element_size()
+#     total_size = (param_size + buffer_size) / 1024**2  # byte → MB
+#     return total_size
+# def analyze_model_size(model):
+#     total_params = 0
+#     learnable_params = 0
+#     param_size_bytes = 0
+#     buffer_size_bytes = 0
 
-    for param in model.parameters():
-        numel = param.numel()
-        total_params += numel
-        if param.requires_grad:
-            learnable_params += numel
-        param_size_bytes += numel * param.element_size()
+#     for param in model.parameters():
+#         numel = param.numel()
+#         total_params += numel
+#         if param.requires_grad:
+#             learnable_params += numel
+#         param_size_bytes += numel * param.element_size()
 
-    for buffer in model.buffers():
-        buffer_size_bytes += buffer.numel() * buffer.element_size()
+#     for buffer in model.buffers():
+#         buffer_size_bytes += buffer.numel() * buffer.element_size()
 
-    total_size_mb = (param_size_bytes + buffer_size_bytes) / 1024**2
+#     total_size_mb = (param_size_bytes + buffer_size_bytes) / 1024**2
 
-    print(f"🧮 Total parameters         : {total_params:,}")
-    print(f"🧠 Learnable parameters     : {learnable_params:,}")
-    print(f"💾 Model size (float32)     : {total_size_mb:.2f} MB")
-    return total_params, learnable_params, total_size_mb
+#     print(f"🧮 Total parameters         : {total_params:,}")
+#     print(f"🧠 Learnable parameters     : {learnable_params:,}")
+#     print(f"💾 Model size (float32)     : {total_size_mb:.2f} MB")
+#     return total_params, learnable_params, total_size_mb
 
-import sys
+# import sys
 
-def get_tensor_size_in_bytes(tensor):
-    return tensor.numel() * tensor.element_size()
+# def get_tensor_size_in_bytes(tensor):
+#     return tensor.numel() * tensor.element_size()
 
-def get_model_memory_usage(model):
-    total_bytes = 0
-    for param in model.parameters():
-        total_bytes += get_tensor_size_in_bytes(param)
-    for buffer in model.buffers():
-        total_bytes += get_tensor_size_in_bytes(buffer)
-    total_mb = total_bytes / 1024**2
-    return total_mb
+# def get_model_memory_usage(model):
+#     total_bytes = 0
+#     for param in model.parameters():
+#         total_bytes += get_tensor_size_in_bytes(param)
+#     for buffer in model.buffers():
+#         total_bytes += get_tensor_size_in_bytes(buffer)
+#     total_mb = total_bytes / 1024**2
+#     return total_mb

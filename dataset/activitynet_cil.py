@@ -59,7 +59,6 @@ class ActivitynetDataset(Dataset):
         self.rand_erase = False
         self.all_frames = all_frames
         self.task_id = task_id
-        self.set_selection_frame = False
         self.rehearsal = rehearsal
         if loader == 'decord':
             self.loader = self.loadvideo_decord
