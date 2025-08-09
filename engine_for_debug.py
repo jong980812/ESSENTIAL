@@ -87,7 +87,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
                     model.to(args.device)
                     model_without_ddp = model.module
                 elif args.model=='AIM_custom' or args.model=='AIM_base' or args.model=='AIM_base_decoder':
-                    model.module.unfreeze(args.unfreeze_layers_after_base)
+                    model.module.unfreeze(args.unfreeze_layers_after_base_task)
                     model.to(args.device)
                 
                 optimizer = create_optimizer(

@@ -60,10 +60,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
 
 
         print(f"Start task training for {epochs} epochs")
-
-        if args.joint:
-            if task_id< args.num_tasks-1:
-                continue
                 
         max_accuracy = 0.0
         if task_id > 0:
@@ -79,7 +75,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
             else:
 
 
-                model.module.unfreeze(args.unfreeze_layers_after_base)
+                model.module.unfreeze(args.unfreeze_layers_after_base_task)
 
                 model.module.freeze_all_MR()
                 model.module.unfreeze_MR(task_id)
@@ -106,7 +102,7 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         for epoch in range(epochs): 
             if args.ssv2_first_finetune is not None and (task_id<1): # we can skip the first task if you have first_finetune pth.
                 break
-            if args.joint or args.inference or args.debugging or args.no_training:
+            if args.inference or args.debugging or args.no_training:
                 break
 
             if args.distributed:
@@ -147,12 +143,6 @@ def train_and_evaluate(model: torch.nn.Module, model_without_ddp: torch.nn.Modul
         
         #? ************************ Rehearsal *************************************
         if args.rehearsal_samples_per_class > 0 and not args.inference:# and task_id > 0:
-            # model, unfreeze_list = unfreeze_block(model,['head','S_Adapter','MLP_Adapter'])
-            # print(unfreeze_list)
-            # print('Freeze for rehearsal')
-                   # lr scehdule
-            # model.module.unfreeze(args.unfreeze_layers_rehearsal)
-            # if 'CLIP' in args.model:
             model.module.freeze_all_MR()
             optimizer = create_optimizer(
             args, model_without_ddp, skip_list=args.skip_weight_decay_list,
@@ -262,7 +252,6 @@ def train_one_epoch(model: torch.nn.Module,
                     set_training_mode=True, task_id=-1, class_mask=None, args = None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
                     num_training_steps_per_epoch=None, update_freq=None,header=None,loss_scaler=None, rehearsal = False,
-                    frame_making=False
                     ):
 
     model.train(set_training_mode)
@@ -315,20 +304,19 @@ def train_one_epoch(model: torch.nn.Module,
             model, samples, targets, criterion,mask,task_id,args,device)
         else:
             with torch.cuda.amp.autocast():
-                loss,frame_matching,token_matching,virtual_loss, output= train_class_batch(
+                loss,static_matching,temporal_matching,virtual_loss, output= train_class_batch(
                 model, samples, targets, criterion,mask,task_id,sample_task_id,args,device,
-                rehearsal,
-                frame_making,indices)
+                rehearsal,indices)
         if loss is None:
             loss = torch.tensor(0.).to(device)
         loss_value =loss.item()
-        if frame_matching is not None:
-            frame_matching_value = args.static_matching_weight*frame_matching.item()
-            loss +=args.static_matching_weight*frame_matching
+        if static_matching is not None:
+            static_matching_value = args.static_matching_weight*static_matching.item()
+            loss +=args.static_matching_weight*static_matching
             
-        if token_matching is not None:
-            token_matching_value = args.temporal_matching_weight*token_matching.item()
-            loss +=args.temporal_matching_weight*token_matching
+        if temporal_matching is not None:
+            temporal_matching_value = args.temporal_matching_weight*temporal_matching.item()
+            loss +=args.temporal_matching_weight*temporal_matching
             
         if virtual_loss is not None:
             virtual_value = args.virtual_weight*virtual_loss.item()
@@ -361,7 +349,7 @@ def train_one_epoch(model: torch.nn.Module,
 
         torch.cuda.synchronize()
 
-        if args.mixup_fn is None and not frame_making:
+        if args.mixup_fn is None:
             class_acc = (output.max(-1)[-1] == targets).float().mean()
         else:
             class_acc = None
@@ -369,8 +357,8 @@ def train_one_epoch(model: torch.nn.Module,
             
         metric_logger.update(origin_loss=loss_value)
         metric_logger.update(virtual_loss=virtual_value) if virtual_loss is not None else None
-        metric_logger.update(frame_matching=frame_matching_value) if frame_matching is not None else None 
-        metric_logger.update(token_matching=token_matching_value) if token_matching is not None else None 
+        metric_logger.update(static_matching=static_matching_value) if static_matching is not None else None 
+        metric_logger.update(temporal_matching=temporal_matching_value) if temporal_matching is not None else None 
         # metric_logger.update(order=order_loss.item()) if order_loss is not None else None 
         # metric_logger.update(cls_aug_loss=cls_aug_loss.item()) if cls_aug_loss is not None else None 
         # metric_logger.update(debias=debias_loss.item()) if debias_loss is not None else None
@@ -398,16 +386,10 @@ def train_one_epoch(model: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal,frame_making,selected_frame):
-    
-    # if args.each_head:
-    # first_class = mask[0]
-    # if args.order:
-    outputs,frame_matching,token_matching = model(samples,train=True,class_id=target,task_id=task_id,sample_task_id=sample_task_id,
-                                rehearsal = rehearsal,frame_making=frame_making,selected_frame=selected_frame) 
-    # else:
-    #     outputs,_= model(samples,train=True,task_id=task_id)
+def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task_id,args,device,rehearsal,selected_frame):
 
+    outputs,static_matching,temporal_matching = model(samples,train=True,class_id=target,task_id=task_id,sample_task_id=sample_task_id,
+                                rehearsal = rehearsal,selected_frame=selected_frame) 
     if (mask is not None) and (not args.each_head) and (not args.cos): #! each head이면 안됌.
         not_mask = np.setdiff1d(np.arange(args.nb_classes), mask)
         not_mask = torch.tensor(not_mask, dtype=torch.int64).to(device)
@@ -433,7 +415,7 @@ def train_class_batch(model, samples, target, criterion,mask,task_id,sample_task
     
   
         
-    return loss,(frame_matching),token_matching,(loss_virtual), origin
+    return loss,(static_matching),temporal_matching,(loss_virtual), origin
 
 
 def get_loss_scale_for_deepspeed(model):
@@ -487,8 +469,8 @@ def evaluate(model: torch.nn.Module,  data_loader,
             
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'#frame loss {frame_matching.global_avg:.3f}'
-          .format(top1=metric_logger.meters['Acc@1'], top5=metric_logger.meters['Acc@5'], losses=metric_logger.meters['Loss'])),#frame_matching=metric_logger.meters['Frame_matching']))
+    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'#frame loss {static_matching.global_avg:.3f}'
+          .format(top1=metric_logger.meters['Acc@1'], top5=metric_logger.meters['Acc@5'], losses=metric_logger.meters['Loss'])),#static_matching=metric_logger.meters['static_matching']))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -676,7 +658,7 @@ def save_frame_index(model: torch.nn.Module,
     memory_video_path = {'dataset_samples':[],'label_array':[],'selected_frame':[],'samples_task_id':[]}
     model.eval()
     re_dataset = data_loader[task_id]['rehearsal'].dataset
-    re_dataset.all_frames = True
+    # re_dataset.all_frames = True
     num_tasks = 1#utils.get_world_size()
     global_rank = utils.get_rank()
     sampler_rehearsal = torch.utils.data.DistributedSampler(re_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True)

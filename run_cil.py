@@ -218,52 +218,47 @@ def get_args_cil():
     #********** CIL parameters*****************
     parser.add_argument('--num_tasks', default=10, type=int,
                         help='all_task number')
-    parser.add_argument('--memory_size', default=2000, type=int,help='instance number')
+    parser.add_argument('--fs_topk', default=8, type=int,help='temporal length of saved features, l')
+    parser.add_argument('--rehearsal_samples_per_class', default=20, type=int,help='number of samples per class for rehearsal, N_s')
+    parser.add_argument('--memory_size', default=2000, type=int,help='This is vCLIMB style, but our imple is TCD style. Keep it positive value')
     parser.add_argument('--memory_video_path', default={'dataset_samples':[],
                                                         'label_array':[]}, type=dict,help='instance number')
     parser.add_argument('--rehearsal_epochs', default=50, type=int)
-    parser.add_argument('--prefix', type=int, default=0)
-    parser.add_argument('--postfix', type=int, default=0)
-    parser.add_argument('--pretrain', default=None, type=str)
+    # parser.add_argument('--prefix', type=int, default=0)
+    # parser.add_argument('--postfix', type=int, default=0)
+    # parser.add_argument('--pretrain', default=None, type=str)
     
     #************* EMA*******************
     parser.add_argument('--disable_eval_during_finetuning', action='store_true', default=False)
-    parser.add_argument('--model_ema', action='store_true', default=False)
-    parser.add_argument('--model_ema_decay', type=float, default=0.9999, help='')
-    parser.add_argument('--model_ema_force_cpu', action='store_true', default=False, help='')
+    # parser.add_argument('--model_ema', action='store_true', default=False)
+    # parser.add_argument('--model_ema_decay', type=float, default=0.9999, help='')
+    # parser.add_argument('--model_ema_force_cpu', action='store_true', default=False, help='')
     
     #************ Prompt ******************
-    parser.add_argument('--input_prompt_type', type=str, default=None, help='adapter prompt dimension')
-    parser.add_argument('--input_prompt_len', type=int, default=10, help='adapter prompt dimension')
-    
+    parser.add_argument('--len_sem_prompt', default=8, type=int)
+    parser.add_argument('--static_matching_weight', default=1.0, type=float)
+    parser.add_argument('--temporal_matching_weight', default=1.0, type=float)
+    parser.add_argument('--virtual_weight', default=1.0, type=float)
+    parser.add_argument('--static_matching', default=False, action='store_true')
+    parser.add_argument('--temporal_matching', default=False, action='store_true')
+    parser.add_argument('--prompt_mode', default='cross', type=str,choices=['cross','self','3_layer_mlp'],)
+    parser.add_argument('--memory_mode', default='task', type=str,choices=['task','global','identity'],)
     #*********** Adapter *******************
     parser.add_argument('--dim_mlp', type=int, default=192, help='adapter bottleneck dimension')
-    parser.add_argument('--mode',default='copy',choices=['copy','new','copy_without_T'])
-    
-    
-    parser.add_argument('--cross', action='store_true', default=False, help='')
     parser.add_argument('--inference', action='store_true', default=False, help='')
-    parser.add_argument('--each_head', action='store_true', default=False, help='')
-    parser.add_argument('--joint', action='store_true', default=False, help='')
-    parser.add_argument('--slow_learner', action='store_true', default=False, help='')
-    parser.add_argument('--order', action='store_true', default=False, help='')
-    parser.add_argument('--debias', action='store_true', default=False, help='')
-    parser.add_argument('--cls_aug', action='store_true', default=False, help='')
     parser.add_argument('--adapter_init_scale', type=float, default=1.0, help='')
     
     
-    #**************BA*****************
+    #*******************************
     parser.add_argument('--cos', action='store_true', default=False, help='')
     parser.add_argument('--cos_temp', default=4, type=int)
-    parser.add_argument('--ba_layers', default=1, type=int)
-    parser.add_argument('--ba_heads', default=12, type=int)
-    parser.add_argument('--ba_dim', default=192, type=int)
-    parser.add_argument('--temp_mode', default='ba', type=str)
-    parser.add_argument('--unfreeze_layers_after_base', default=None, nargs='+', type=str)
+    parser.add_argument('--temporal_layer', default=1, type=int)
+    parser.add_argument('--temporal_heads', default=12, type=int)
+    parser.add_argument('--temp_mode', default='attention', type=str)
+    parser.add_argument('--unfreeze_layers_after_base_task', default=None, nargs='+', type=str)
     parser.add_argument('--unfreeze_layers_rehearsal', default=None, nargs='+', type=str)
     parser.add_argument('--ssv2_first_finetune', default=None, type=str)
     parser.add_argument('--get_frame_index', action='store_true', default=False, help='')
-    parser.add_argument('--fs_topk', default=8, type=int)
     parser.add_argument('--debugging', action='store_true', default=False)#! No train 
     parser.add_argument('--handcrafted_selection', action='store_true', default=False)
     parser.add_argument('--selected_selection', action='store_true', default=False)
@@ -274,27 +269,15 @@ def get_args_cil():
     #! frame selection in last epoch
     parser.add_argument('--set_selection_frame', action='store_true', default=False)
     parser.add_argument('--sample_selection', action='store_true', default=False)
-    parser.add_argument('--rehearsal_samples_per_class', default=20, type=int)
     parser.add_argument('--replay_token', default=False, action='store_true')
     parser.add_argument('--no_valid', default=False, action='store_true')
     parser.add_argument('--no_training', default=False, action='store_true')
     parser.add_argument('--no_rehearsal', default=False, action='store_true')
-    parser.add_argument('--frame_making', default=False, action='store_true')
 
-    parser.add_argument('--len_prompt', default=8, type=int)
-    parser.add_argument('--static_matching_weight', default=1.0, type=float)
-    parser.add_argument('--temporal_matching_weight', default=1.0, type=float)
-    parser.add_argument('--virtual_weight', default=1.0, type=float)
-    parser.add_argument('--frame_matching', default=False, action='store_true')
-    parser.add_argument('--token_matching', default=False, action='store_true')
-    parser.add_argument('--task2_weight', default=None, type=str)
-    parser.add_argument('--prompt_mode', default='cross', type=str)
-    parser.add_argument('--memory_mode', default='task', type=str)
-    parser.add_argument('--fine_tune_path', default=None, type=str)
-    parser.add_argument('--base_tuning', default=False, action='store_true')
-    parser.add_argument('--Temporal_adaptation', default=False, action='store_true')
-    parser.add_argument('--tsne', default=False, action='store_true')
-    parser.add_argument('--imagenet', default=False, action='store_true')
+
+    parser.add_argument('--fine_tune_path', default=None, type=str,help='fine-tune from checkpoint for inference')
+    parser.add_argument('--base_tuning', default=False, action='store_true',help='only base task tuning')
+    parser.add_argument('--imagenet', default=False, action='store_true',help='using imagenet pretrain weight')
 
 
 
@@ -394,9 +377,9 @@ def main(args, ds_init):
     if args.ssv2_first_finetune is not None:
         check = torch.load(args.ssv2_first_finetune,'cpu')['model']
         if args.memory_mode =='global':
-            print(model.load_state_dict(check,False))
+            print(model.load_state_dict(check,True))
         else:
-            print(model.load_state_dict(check,False))
+            print(model.load_state_dict(check,True))
         del check
     model.to(device)
     model_without_ddp = model
