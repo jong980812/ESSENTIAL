@@ -57,55 +57,14 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
 
 </div>
  -->
-<!-- 두 피규어: 50/50 가로 배치 + 하단 정렬 + 반응형 -->
-<style>
-  .two-fig-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr; /* 절반씩 */
-    gap: 1rem;                      /* 피규어 사이 간격 */
-    align-items: end;               /* 그리드 아이템 하단 정렬 */
-  }
-  .two-fig-grid figure {
-    display: flex;
-    flex-direction: column;         /* 이미지 위, 캡션 아래 */
-    justify-content: flex-end;      /* 캡션이 같은 선에 오도록 하단 정렬 */
-    margin: 0;
-    text-align: center;             /* 캡션 가운데 정렬 */
-  }
-  .two-fig-grid img {
-    width: 100%;
-    height: auto;
-    display: block;
-  }
-  .two-fig-grid figcaption {
-    font-size: 0.9rem;
-    color: gray;
-    margin-top: 6px;
-  }
-  /* 모바일(태블릿 이하)에서는 세로로 스택 */
-  @media (max-width: 768px) {
-    .two-fig-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>
+![Turing Machine](static/image/Figure1-2.png)
 
-<div class="two-fig-grid">
-  <figure>
-    <img src="static/image/teaser.png" alt="Performance-memory plot on UCF-101 (TCD)">
-    <figcaption>1. Performance-memory plot on the UCF-101 dataset from the TCD benchmark</figcaption>
-  </figure>
-
-  <figure>
-    <img src="static/image/motivation.png" alt="MR module trade-off">
-    <figcaption>2. MR module achieves a better performance-memory-efficiency trade-off.</figcaption>
-  </figure>
-</div>
 
 
 ## Motivation
 
-ESSENTIAL is designed to overcome the trade-off in VCIL between **performance** and **memory-efficiency**. In Figure2, 
+ESSENTIAL is designed to overcome the trade-off in VCIL between **performance** and **memory-efficiency**. <br>
+In Figure1, 
 
 - 📉 **(a) Temporally dense features** stored in episodic memory yield high performance but suffer from **low memory-efficiency**.  
 - 💾 **(b) Temporally sparse features** improve **memory-efficiency**, but lack of temporal context leads to **performance degradation**.  
@@ -113,33 +72,82 @@ ESSENTIAL is designed to overcome the trade-off in VCIL between **performance** 
 
 > The distance between the **retrieved feature vector** and the **original temporally dense feature vector** is significantly smaller than that between the **temporally sparse feature vector** and the **temporally dense feature vector**.
 
-*By effectively retrieving temporal information from temporally sparse features, the MR module enables a high memory-efficiency-performance trade-off as demonstrated in **Figure 1**.*
+*By effectively retrieving temporal information from temporally sparse features, the MR module enables a high memory-efficiency-performance trade-off as demonstrated in **Figure 2**.*
 
 
+
+## ESSENTIAL
+
+The core philosophy of ***ESSENTIAL*** is to achieve a better trade-off between **memory-efficiency** and **performance** in video class-incremental learning.
+
+1. **Reducing memory consumption**  
+   We store only *temporally sparse* features in episodic memory, instead of *temporally dense* features, along with *lightweight* semantic prompts.
+
+2. **Mitigating catastrophic forgetting**  
+   To maintain high performance, the MR module retrieves *temporally dense* features during the rehearsal stage by applying cross-attention between *temporally sparse* features and semantic prompts.
+
+3. **Training for effective retrieval**  
+   The MR module is trained at each incremental stage to reconstruct temporally dense features using the stored *temporally sparse* features and semantic prompts as input.
 
 ## Architecture
-1. Turing first presented the concept of a "computable number," which refers to a number that can be computed by an algorithm or a definite step-by-step process.
-2. He introduced the notion of a Turing machine, an abstract computational device consisting of an infinite tape divided into cells and a read-write head. The machine can read and write symbols on the tape, move the head left or right, and transition between states based on a set of rules.
-3. Turing demonstrated that the set of computable numbers is enumerable, meaning it can be listed in a systematic way, even though it is not necessarily countable.
-4. He proved the existence of non-computable numbers, which cannot be computed by any Turing machine.
-5. Turing showed that the Entscheidungsproblem is undecidable, meaning there is no algorithm that can determine, for any given mathematical statement, whether it is provable or not.
 
-![Turing Machine](static/image/Training.png)
-![Turing Machine](static/image/rehearsal.png)
+<img src="static/image/Training.png" alt="Visual and Temporal Encoding" style="width:100%;">
 
+### Visual and temporal feature extraction
+ESSENTIAL uses a frozen visual encoder to obtain frame-level **temporally dense** features from the input video. These features are passed into a learnable temporal encoder, producing a clip-level representation that captures the video’s temporal dynamics.
 
-## Table: Comparison of Computable and Non-Computable Numbers
+---
 
-| Computable Numbers | Non-Computable Numbers |
-|-------------------|-----------------------|
-| Rational numbers, e.g., 1/2, 3/4 | Transcendental numbers, e.g., π, e |
-| Algebraic numbers, e.g., √2, ∛3 | Non-algebraic numbers, e.g., √2 + √3 |
-| Numbers with finite decimal representations | Numbers with infinite, non-repeating decimal representations |
+<img src="static/image/mr_module.png" alt="Memory Retrieval Module" style="width:100%;">
 
-He used the concept of a universal Turing machine to prove that the set of computable functions is recursively enumerable, meaning it can be listed by an algorithm.
+### Memory Retrieval (MR) module 
+The MR module is designed to reconstruct **temporally dense** features from stored **temporally sparse** features. It is trained with both static and temporal matching losses to ensure accurate retrieval. At its core, the MR module performs cross-attention between **learnable semantic prompts** and sparse features. Through training, the semantic prompts learn general knowledge, while the MR module learns to recover dense features using only sparse features and the prompts.
 
-## Significance
-Turing's paper laid the foundation for the theory of computation and had a profound impact on the development of computer science. The Turing machine became a fundamental concept in theoretical computer science, serving as a theoretical model for studying the limits and capabilities of computation. Turing's work also influenced the development of programming languages, algorithms, and the design of modern computers.
+---
+
+<img src="static/image/rehearsal.png" alt="Rehearsal Training" style="width:100%;">
+
+### Rehearsal training with retrieved features   
+During rehearsal, the MR module integrates episodic memory and semantic memory via cross-attention, retrieving temporally dense features from temporally sparse features. These retrieved features are replayed for rehearsal training, allowing ESSENTIAL to mitigate catastrophic forgetting while maintaining high memory-efficiency.
+
+### 📈 Experimental Results
+
+<div align="center">
+
+#### 📊 Comparison with the state-of-the-arts on the vCLIMB Benchmark
+We report the Top-1 average accuracy (%) and the total memory usage (MiB).  
+We indicate the backbone model in parentheses. The best are in **bold**, and the second best are _underscored_.  
+A dash (-) denotes a value not reported in the original paper.  
+**ESSENTIAL** achieves the best performance with minimal memory consumption across all datasets in the benchmark.
+
+<img src="static/image/vclimb.png" alt="Comparison on vCLIMB Benchmark" style="width:90%;">
+
+</div>
+
+---
+
+<div align="center">
+
+#### 📊 Comparison with the state-of-the-arts on the TCD Benchmark
+We report the Top-1 average incremental accuracy (%) and the total memory usage (MiB).  
+We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
+The best are in **bold** and the second best are _underscored_.
+
+<img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
+
+</div>
+
+---
+
+<div align="center">
+
+#### 🔍 Ablation study
+We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
+
+<img src="static/image/ablation.png" alt="Ablation Study" style="width:90%;">
+
+</div>
+
 
 ## Citation
 ```
