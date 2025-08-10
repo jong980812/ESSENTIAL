@@ -139,7 +139,7 @@ During rehearsal, the MR module integrates episodic memory and semantic memory v
 ## 📈 Experimental Results
 
 <div align="center">
-  <h4>📊 Comparison with the state-of-the-arts on the vCLIMB Benchmark</h4>
+  <h3>📊 Comparison with the state-of-the-arts on the vCLIMB Benchmark</h3>
   <p>
     We report the Top-1 average accuracy (%) and the total memory usage (MiB).  
     We indicate the backbone model in parentheses. The best are in <b>bold</b>, and the second best are <i>underscored</i>.  
@@ -174,7 +174,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
 </div> -->
 ---
 <div align="center">
-  <h4>📊 Comparison with the state-of-the-arts on the TCD Benchmark</h4>
+  <h3>📊 Comparison with the state-of-the-arts on the TCD Benchmark</h3>
   <p>
     We report the Top-1 average incremental accuracy (%) and the total memory usage (MiB).  
     We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
@@ -186,7 +186,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
 ---
 
 <div align="center">
-  <h4>🔍 Ablation study</h4>
+  <h3>🔍 Ablation study</h3>
   <p>
     We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
   </p>
@@ -195,30 +195,30 @@ We conduct extensive ablation studies to examine the design choices of the propo
 
 ---
 <div align="center">
-  <h4>Analysis</h4>
+  <h3>Analysis</h3>
 
   <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; max-width: 1000px;">
     <!-- 첫 번째 그림+설명 -->
     <div style="width: 45%; text-align: center;">
       <img src="static/image/robust.png" alt="Figure 1" style="width: 100%;">
       <h4>Is ESSENTIAL robust to a decreasing number of frame features?</h4>
-      <p style="font-size: 0.95em; color: #444; margin-top: 8px;">
-      The results indicate that ESSENTIAL effectively mitigates forgetting even when storing temporally sparse features, thanks to the retrieval capability of the MR module. This retrieval enables us to store only temporally sparse features in episodic memory, leading to high memory-efficiency.
+      <p style="font-size: 0.95em; color: #444; margin-top: 8px; text-align: justify;">
+        The results indicate that ESSENTIAL effectively mitigates forgetting even when storing temporally sparse features, thanks to the retrieval capability of the MR module. This retrieval enables us to store only temporally sparse features in episodic memory, leading to high memory-efficiency.
       </p>
     </div>
+    <!-- 두 번째 그림+설명 -->
     <div style="width: 49%; text-align: center;">
       <img src="static/image/tsne.png" alt="Figure 2" style="width: 100%;">
       <h4>Does the MR module effectively retrieve temporally dense features?</h4>
-      <p style="font-size: 0.95em; color: #444; margin-top: 8px;">
-    The distance between \( \mathbf{S}_{\text{dense}} \) and \( \tilde{\mathbf{S}}_{\text{dense}} \) 
-    is reduced compared to the distance between \( \mathbf{S}_{\text{dense}} \) and \( \mathbf{S}_{\text{sparse}} \) (8.2 vs. 19.4).  
-    We can qualitatively observe that the retrieved feature vectors,  
-    \(( \tilde{\mathbf{S}}_{\text{dense}}, \textcolor[rgb]{0.0,0.6,0.0}{\text{circles}} )\),  
-    are closer to the original temporally dense feature vectors,  
-    \(( \mathbf{S}_{\text{dense}}, \textcolor[rgb]{0.0,0.35,0.7}{\text{crosses}} )\),  
-    compared to the sparse feature vectors,  
-    \(( \mathbf{S}_{\text{sparse}}, \textcolor[rgb]{0.8,0.2,0.2}{\text{squares}} )\).
-    </p>
+      <p style="font-size: 0.95em; color: #444; margin-top: 8px; text-align: justify;">
+        We can qualitatively observe that the retrieved feature vectors, 
+        \(( \tilde{\mathbf{S}}_{\text{dense}}, \textcolor[rgb]{0.0,0.6,0.0}{\text{circles}} )\), 
+        are closer to the original temporally dense feature vectors, 
+        \(( \mathbf{S}_{\text{dense}}, \textcolor[rgb]{0.0,0.35,0.7}{\text{crosses}} )\), 
+        compared to the sparse feature vectors, 
+        \(( \mathbf{S}_{\text{sparse}}, \textcolor[rgb]{0.8,0.2,0.2}{\text{squares}} )\). 
+        This result indicates that the MR module effectively retrieves temporally dense features from temporally sparse features.
+      </p>
     </div>
   </div>
 </div>
