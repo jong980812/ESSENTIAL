@@ -21,7 +21,7 @@ affiliations:
 #   - gm-park@korea.ac.kr
 paper: https://www.cs.virginia.edu/~robins/Turing_Paper_1936.pdf
 # video: https://www.youtube.com/results?search_query=turing+machine
-code: https://github.com/topics/turing-machines
+code: https://github.com/jong980812/ESSENTIAL
 # data: https://huggingface.co/docs/datasets
 highlight: "ICCV 2025 Highlight Paper"
 ---
