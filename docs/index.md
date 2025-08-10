@@ -38,7 +38,7 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
 </div>
 
 ---
-
+<!-- 
 <div style="display: flex; justify-content: center; align-items: flex-start; gap: 0px;">
   
   <figure style="flex: 0 0 55%; text-align: center;">
@@ -56,7 +56,51 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
   </figure>
 
 </div>
+ -->
+<!-- 두 피규어: 50/50 가로 배치 + 하단 정렬 + 반응형 -->
+<style>
+  .two-fig-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* 절반씩 */
+    gap: 1rem;                      /* 피규어 사이 간격 */
+    align-items: end;               /* 그리드 아이템 하단 정렬 */
+  }
+  .two-fig-grid figure {
+    display: flex;
+    flex-direction: column;         /* 이미지 위, 캡션 아래 */
+    justify-content: flex-end;      /* 캡션이 같은 선에 오도록 하단 정렬 */
+    margin: 0;
+    text-align: center;             /* 캡션 가운데 정렬 */
+  }
+  .two-fig-grid img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .two-fig-grid figcaption {
+    font-size: 0.9rem;
+    color: gray;
+    margin-top: 6px;
+  }
+  /* 모바일(태블릿 이하)에서는 세로로 스택 */
+  @media (max-width: 768px) {
+    .two-fig-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
 
+<div class="two-fig-grid">
+  <figure>
+    <img src="static/image/teaser.png" alt="Performance-memory plot on UCF-101 (TCD)">
+    <figcaption>1. Performance-memory plot on the UCF-101 dataset from the TCD benchmark</figcaption>
+  </figure>
+
+  <figure>
+    <img src="static/image/motivation.png" alt="MR module trade-off">
+    <figcaption>2. MR module achieves a better performance-memory-efficiency trade-off.</figcaption>
+  </figure>
+</div>
 
 
 ## Motivation
