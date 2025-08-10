@@ -60,7 +60,7 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
 
 
 
-## Motivation
+## 💡 Motivation
 
 ESSENTIAL is designed to overcome the trade-off in VCIL between **performance** and **memory-efficiency**. <br>
 In Figure1, 
@@ -75,9 +75,11 @@ In Figure1,
 
 
 
-## ESSENTIAL
+<!-- ## 🎯 Method: *ESSENTIAL* -->
+<!-- ## 🎯 Method: <span style="font-family: 'Courier New', monospace; font-weight: bold; color: #000000ff;">ESSENTIAL</span> -->
+## 🎯 Philosophy
 
-The core philosophy of ***ESSENTIAL*** is to achieve a better trade-off between **memory-efficiency** and **performance** in video class-incremental learning.
+The core philosophy of  <span style="font-family: 'Courier New', monospace; font-weight: bold; color: #111111ff;">ESSENTIAL</span> is to achieve a better trade-off between **memory-efficiency** and **performance** in video class-incremental learning.
 
 1. **Reducing memory consumption**  
    We store only *temporally sparse* features in episodic memory, instead of *temporally dense* features, along with *lightweight* semantic prompts.
@@ -88,7 +90,7 @@ The core philosophy of ***ESSENTIAL*** is to achieve a better trade-off between 
 3. **Training for effective retrieval**  
    The MR module is trained at each incremental stage to reconstruct temporally dense features using the stored *temporally sparse* features and semantic prompts as input.
 
-## Architecture
+## ⚙️ Architecture
 
 <img src="static/image/Training.png" alt="Visual and Temporal Encoding" style="width:100%;">
 <div align="center">
@@ -144,7 +146,7 @@ During rehearsal, the MR module integrates episodic memory and semantic memory v
     A dash (-) denotes a value not reported in the original paper.  
     <b>ESSENTIAL</b> achieves the best performance with minimal memory consumption across all datasets in the benchmark.
   </p>
-  <img src="static/image/vclimb.png" alt="Comparison on vCLIMB Benchmark" style="width:80%;">
+  <img src="static/image/vclimb.png" alt="Comparison on vCLIMB Benchmark" style="width:90%;">
 </div>
 
 <!-- ---
@@ -156,7 +158,7 @@ We report the Top-1 average incremental accuracy (%) and the total memory usage 
 We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
 The best are in **bold** and the second best are _underscored_.
 
-<img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:80%;">
+<img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
 
 </div>
 
@@ -167,7 +169,7 @@ The best are in **bold** and the second best are _underscored_.
 #### 🔍 Ablation study
 We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
 
-<img src="static/image/ablation.png" alt="Ablation Study" style="width:80%;">
+<img src="static/image/ablation.png" alt="Ablation Study" style="width:90%;">
 
 </div> -->
 ---
@@ -178,7 +180,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
     We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
     The best are in <b>bold</b> and the second best are <i>underscored</i>.
   </p>
-  <img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:80%;">
+  <img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
 </div>
 
 ---
@@ -188,8 +190,39 @@ We conduct extensive ablation studies to examine the design choices of the propo
   <p>
     We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
   </p>
-  <img src="static/image/ablation.png" alt="Ablation Study" style="width:80%;">
+  <img src="static/image/ablation.png" alt="Ablation Study" style="width:90%;">
 </div>
+
+---
+<div align="center">
+  <h4>Analysis</h4>
+
+  <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; max-width: 1000px;">
+    <!-- 첫 번째 그림+설명 -->
+    <div style="width: 45%; text-align: center;">
+      <img src="static/image/robust.png" alt="Figure 1" style="width: 100%;">
+      <h4>Is ESSENTIAL robust to a decreasing number of frame features?</h4>
+      <p style="font-size: 0.95em; color: #444; margin-top: 8px;">
+      The results indicate that ESSENTIAL effectively mitigates forgetting even when storing temporally sparse features, thanks to the retrieval capability of the MR module. This retrieval enables us to store only temporally sparse features in episodic memory, leading to high memory-efficiency.
+      </p>
+    </div>
+    <div style="width: 49%; text-align: center;">
+      <img src="static/image/tsne.png" alt="Figure 2" style="width: 100%;">
+      <h4>Does the MR module effectively retrieve temporally dense features?</h4>
+      <p style="font-size: 0.95em; color: #444; margin-top: 8px;">
+    The distance between \( \mathbf{S}_{\text{dense}} \) and \( \tilde{\mathbf{S}}_{\text{dense}} \) 
+    is reduced compared to the distance between \( \mathbf{S}_{\text{dense}} \) and \( \mathbf{S}_{\text{sparse}} \) (8.2 vs. 19.4).  
+    We can qualitatively observe that the retrieved feature vectors,  
+    \(( \tilde{\mathbf{S}}_{\text{dense}}, \textcolor[rgb]{0.0,0.6,0.0}{\text{circles}} )\),  
+    are closer to the original temporally dense feature vectors,  
+    \(( \mathbf{S}_{\text{dense}}, \textcolor[rgb]{0.0,0.35,0.7}{\text{crosses}} )\),  
+    compared to the sparse feature vectors,  
+    \(( \mathbf{S}_{\text{sparse}}, \textcolor[rgb]{0.8,0.2,0.2}{\text{squares}} )\).
+    </p>
+    </div>
+  </div>
+</div>
+
 
 
 ## Citation
