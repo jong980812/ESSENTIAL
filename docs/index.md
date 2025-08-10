@@ -195,13 +195,10 @@ We conduct extensive ablation studies to examine the design choices of the propo
 
 ## Citation
 ```
-@article{turing1936computable,
-  title={On computable numbers, with an application to the Entscheidungsproblem},
-  author={Turing, Alan Mathison},
-  journal={Journal of Mathematics},
-  volume={58},
-  number={345-363},
-  pages={5},
-  year={1936}
+@inproceedings{lee2025essential,
+  title={ESSENTIAL: Episodic and Semantic Memory Integration for Video Class-Incremental Learning},
+  author={Lee, Jongseo and Bae, Kyungho and Min, Kyle and Park, Gyeong-Moon and Choi, Jinwoo},
+  booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
+  year={2025}
 }
 ```
