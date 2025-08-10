@@ -6,8 +6,7 @@ title: "ESSENTIAL: Episodic and Semantic Memory Integration for Video Class-Incr
 authors:
   - '<a href="https://jong980812.github.io/" target="_blank">Jongseo Lee<sup>1*</sup></a>'
   - '<a href="https://github.com/Backdrop9019" target="_blank">Kyungho Bae<sup>2*</sup></a>'
-  # - '<a href="" target="_blank">Kyle Min<sup>3</sup></a>'
-  - Kyle Min<sup>3</sup>
+  - '<a href="https://sites.google.com/view/kylemin" target="_blank">Kyle Min<sup>3</sup></a>'
   - '<a href="https://gyeongmoon.github.io/" target="_blank">Gyeong-Moon Park<sup>4†</sup></a>'
   - '<a href="https://sites.google.com/site/jchoivision/" target="_blank">Jinwoo Choi<sup>1†</sup></a>'
 affiliations:
