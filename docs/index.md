@@ -92,39 +92,63 @@ The core philosophy of ***ESSENTIAL*** is to achieve a better trade-off between 
 ## Architecture
 
 <img src="static/image/Training.png" alt="Visual and Temporal Encoding" style="width:100%;">
-
-### Visual and temporal feature extraction
-ESSENTIAL uses a frozen visual encoder to obtain frame-level **temporally dense** features from the input video. These features are passed into a learnable temporal encoder, producing a clip-level representation that captures the video’s temporal dynamics.
-
+<div align="center">
+  <h4>Visual and temporal feature extraction</h4>
+  <p>
+    ESSENTIAL uses a frozen visual encoder to obtain frame-level <b>temporally dense</b> features 
+    from the input video. These features are passed into a learnable temporal encoder, producing 
+    a clip-level representation that captures the video’s temporal dynamics.
+  </p>
+</div>
 ---
 
 <img src="static/image/mr_module.png" alt="Memory Retrieval Module" style="width:100%;">
 
-### Memory Retrieval (MR) module 
-The MR module is designed to reconstruct **temporally dense** features from stored **temporally sparse** features. It is trained with both static and temporal matching losses to ensure accurate retrieval. At its core, the MR module performs cross-attention between **learnable semantic prompts** and sparse features. Through training, the semantic prompts learn general knowledge, while the MR module learns to recover dense features using only sparse features and the prompts.
+<div align="center">
+  <h4>Memory Retrieval (MR) module</h4>
+  <p>
+    The MR module is designed to reconstruct <b>temporally dense</b> features from stored 
+    <b>temporally sparse</b> features. It is trained with both static and temporal matching losses 
+    to ensure accurate retrieval. At its core, the MR module performs cross-attention between 
+    <b>learnable semantic prompts</b> and sparse features. Through training, the semantic prompts 
+    learn general knowledge, while the MR module learns to recover dense features using only sparse 
+    features and the prompts.
+  </p>
+</div>
 
 ---
-
+<!-- 
 <img src="static/image/rehearsal.png" alt="Rehearsal Training" style="width:100%;">
 
 ### Rehearsal training with retrieved features   
 During rehearsal, the MR module integrates episodic memory and semantic memory via cross-attention, retrieving temporally dense features from temporally sparse features. These retrieved features are replayed for rehearsal training, allowing ESSENTIAL to mitigate catastrophic forgetting while maintaining high memory-efficiency.
-
-### 📈 Experimental Results
+ -->
+ <img src="static/image/rehearsal.png" alt="Rehearsal Training" style="width:100%;">
 
 <div align="center">
-
-#### 📊 Comparison with the state-of-the-arts on the vCLIMB Benchmark
-We report the Top-1 average accuracy (%) and the total memory usage (MiB).  
-We indicate the backbone model in parentheses. The best are in **bold**, and the second best are _underscored_.  
-A dash (-) denotes a value not reported in the original paper.  
-**ESSENTIAL** achieves the best performance with minimal memory consumption across all datasets in the benchmark.
-
-<img src="static/image/vclimb.png" alt="Comparison on vCLIMB Benchmark" style="width:90%;">
-
+  <h4>Rehearsal training with retrieved features</h4>
+  <p>
+    During rehearsal, the MR module integrates episodic memory and semantic memory via cross-attention, 
+    retrieving <b>temporally dense</b> features from <b>temporally sparse</b> features. 
+    These retrieved features are replayed for rehearsal training, allowing ESSENTIAL to mitigate 
+    catastrophic forgetting while maintaining high memory-efficiency.
+  </p>
 </div>
 
----
+## 📈 Experimental Results
+
+<div align="center">
+  <h4>📊 Comparison with the state-of-the-arts on the vCLIMB Benchmark</h4>
+  <p>
+    We report the Top-1 average accuracy (%) and the total memory usage (MiB).  
+    We indicate the backbone model in parentheses. The best are in <b>bold</b>, and the second best are <i>underscored</i>.  
+    A dash (-) denotes a value not reported in the original paper.  
+    <b>ESSENTIAL</b> achieves the best performance with minimal memory consumption across all datasets in the benchmark.
+  </p>
+  <img src="static/image/vclimb.png" alt="Comparison on vCLIMB Benchmark" style="width:80%;">
+</div>
+
+<!-- ---
 
 <div align="center">
 
@@ -133,7 +157,7 @@ We report the Top-1 average incremental accuracy (%) and the total memory usage 
 We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
 The best are in **bold** and the second best are _underscored_.
 
-<img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
+<img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:80%;">
 
 </div>
 
@@ -144,8 +168,28 @@ The best are in **bold** and the second best are _underscored_.
 #### 🔍 Ablation study
 We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
 
-<img src="static/image/ablation.png" alt="Ablation Study" style="width:90%;">
+<img src="static/image/ablation.png" alt="Ablation Study" style="width:80%;">
 
+</div> -->
+---
+<div align="center">
+  <h4>📊 Comparison with the state-of-the-arts on the TCD Benchmark</h4>
+  <p>
+    We report the Top-1 average incremental accuracy (%) and the total memory usage (MiB).  
+    We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
+    The best are in <b>bold</b> and the second best are <i>underscored</i>.
+  </p>
+  <img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:80%;">
+</div>
+
+---
+
+<div align="center">
+  <h4>🔍 Ablation study</h4>
+  <p>
+    We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
+  </p>
+  <img src="static/image/ablation.png" alt="Ablation Study" style="width:80%;">
 </div>
 
 
