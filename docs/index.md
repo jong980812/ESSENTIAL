@@ -27,7 +27,9 @@ highlight: "ICCV 2025 Highlight Paper"
 ---
 
 <!-- Using HTML to center the abstract -->
-<div class="columns is-centered has-text-centered">
+<!-- <div class="columns is-centered has-text-centered">
+ -->
+ <div class="content has-text-justified" style="font-size: 1.15em;">
     <div class="column is-four-fifths">
         <h2>Abstract</h2>
         <div class="content has-text-justified">
@@ -197,7 +199,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
 <div align="center">
   <h3>Analysis</h3>
 
-  <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; max-width: 1000px;">
+  <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; max-width: 1500px;">
     <!-- 첫 번째 그림+설명 -->
     <div style="width: 45%; text-align: center;">
       <img src="static/image/robust.png" alt="Figure 1" style="width: 100%;">
