@@ -19,7 +19,7 @@ affiliations:
 #   - {jong980812, kyungho.bae, jinwoochoi}@khu.ac.kr
 #   - kyle.min@intel.com
 #   - gm-park@korea.ac.kr
-paper: https://www.cs.virginia.edu/~robins/Turing_Paper_1936.pdf
+paper: https://arxiv.org/abs/2508.10896
 # video: https://www.youtube.com/results?search_query=turing+machine
 code: https://github.com/jong980812/ESSENTIAL
 # data: https://huggingface.co/docs/datasets
@@ -27,9 +27,7 @@ highlight: "ICCV 2025 Highlight Paper"
 ---
 
 <!-- Using HTML to center the abstract -->
-<!-- <div class="columns is-centered has-text-centered">
- -->
- <div class="content has-text-justified" style="font-size: 1.15em;">
+<div class="columns is-centered has-text-centered">
     <div class="column is-four-fifths">
         <h2>Abstract</h2>
         <div class="content has-text-justified">
