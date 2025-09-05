@@ -26,7 +26,6 @@ OMP_NUM_THREADS=1 torchrun \
     --epochs 30 \
     --warmup_epochs 5 \
     --dist_eval \
-    --memory_size 2020 \
     --rehearsal_epochs 20 \
     --num_workers 8 \
     --dim_mlp 192 \

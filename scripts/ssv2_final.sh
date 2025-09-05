@@ -27,7 +27,6 @@ OMP_NUM_THREADS=1 torchrun \
     --epochs 50 \
     --warmup_epochs 5 \
     --dist_eval \
-    --memory_size 3480 \
     --rehearsal_epochs 25 \
     --num_workers 8 \
     --dim_mlp 192 \
@@ -45,4 +44,4 @@ OMP_NUM_THREADS=1 torchrun \
     --static_matching_weight 1.0 \
     --temporal_matching_weight 1.0 \
     --get_frame_index \
-    --use_clip_temporal ESSENTIAL/data/clip_temporal.pth \
+    --use_clip_temporal ESSENTIAL/data/clip_temporal.pth 

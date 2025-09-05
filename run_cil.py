@@ -218,7 +218,7 @@ def get_args_cil():
                         help='all_task number')
     parser.add_argument('--fs_topk', default=8, type=int,help='temporal length of saved features, l')
     parser.add_argument('--rehearsal_samples_per_class', default=20, type=int,help='number of samples per class for rehearsal, N_s')
-    parser.add_argument('--memory_size', default=2000, type=int,help='This is vCLIMB style, but our imple is TCD style. Keep it positive value')
+    parser.add_argument('--memory_size', default=10000, type=int,help='This is vCLIMB style, but our imple is TCD style. Keep it positive value')
     parser.add_argument('--memory_video_path', default={'dataset_samples':[],
                                                         'label_array':[]}, type=dict,help='instance number')
     parser.add_argument('--rehearsal_epochs', default=50, type=int)

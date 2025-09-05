@@ -69,7 +69,37 @@ ESSENTIAL/
 ### Step 3. Prepare raw videos
 - The benchmark datasets (e.g., Kinetics-400) should be downloaded separately.  
 ## 🎯 Training
-...
+
+We provide training scripts for two representative benchmarks:
+
+- **TCD (Something-Something V2 based)**: [`scripts/ssv2_final.sh`](./scripts/ssv2_final.sh)  
+- **vCLIMB (UCF101 based)**: [`scripts/ucf_final.sh`](./scripts/ucf_final.sh)  
+
+These scripts contain the recommended hyperparameters and configurations for each benchmark.  
+For other datasets, please adapt the script by changing the following arguments:
+
+- `--data_set` : the dataset name (e.g., `SSV2`, `UCF101`, `Kinetics400`)  
+- `--anno_path` : the path to the corresponding annotation file (e.g., `ESSENTIAL/data/TCD/...pkl`)  
+- `--num_tasks` : the number of incremental tasks for the experiment  
+
+By modifying these options, the same framework can be applied to various datasets under different class-incremental learning scenarios.
 
 ## 📊 Evaluation
-...
+
+To evaluate a trained model, specify the path to the experiment folder using:
+
+- `--fine_tune_path` : path to the folder containing the trained checkpoints  
+
+For evaluation-only mode, enable the following flags:
+
+- `--no_training` : disable further training  
+- `--no_rehearsal` : disable rehearsal during evaluation  
+
+With these options, ESSENTIAL will load the trained checkpoints and report performance without performing additional training or rehearsal.
+
+## 📝 Note
+
+For the convenience of follow-up research and reproducibility,  
+we implemented ESSENTIAL to store tokens in memory during training and evaluation,  
+instead of directly saving them into files.  
+This design choice makes it easier for others to adapt the codebase for new experiments and extend it to different research directions.
