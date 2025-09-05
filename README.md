@@ -1,14 +1,11 @@
 # [🎥 ICCV2025] ESSENTIAL: Episodic and Semantic Memory Integration for Video Class-Incremental Learning
 
-[![Conference](https://img.shields.io/badge/ICCV-2025-blue)](https://iccv2025.thecvf.com/)  
-[![arXiv](https://img.shields.io/badge/arXiv-2508.10896-b31b1b.svg)](https://arxiv.org/abs/2508.10896)  
-[![Project Page](https://img.shields.io/badge/Project-Page-green)](https://jong980812.github.io/ESSENTIAL/)  
-[![Lab](https://img.shields.io/badge/Vision%20and%20Learning-Lab-orange)](https://vll.khuh.ac.kr/)  
+[![Conference](https://img.shields.io/badge/ICCV-2025-blue)](https://iccv2025.thecvf.com/)   [![arXiv](https://img.shields.io/badge/arXiv-2508.10896-b31b1b.svg)](https://arxiv.org/abs/2508.10896)   [![Project Page](https://img.shields.io/badge/Project-Page-green)](https://jong980812.github.io/ESSENTIAL/)   [![Lab](https://img.shields.io/badge/Vision%20and%20Learning-Lab-orange)](https://vll.khuh.ac.kr/)  
 
 ---
 
 <p align="center">
-  <img src="./docs/static/image/overview.png" alt="ESSENTIAL Overview" width="750"/>
+  <img src="./docs/static/image/overview.png" alt="ESSENTIAL Overview" width="1200"/>
 </p>
 
 ---
