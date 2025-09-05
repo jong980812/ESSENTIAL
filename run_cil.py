@@ -260,7 +260,7 @@ def get_args_cil():
     parser.add_argument('--debugging', action='store_true', default=False)#! No train 
     parser.add_argument('--selected_selection', action='store_true', default=False)
     parser.add_argument('--fs_density', action='store_true', default=False)
-    parser.add_argument('--use_aim_weight',type=str, default=None)
+    parser.add_argument('--use_clip_temporal',type=str, default=None)
     
     
     #! frame selection in last epoch
@@ -356,8 +356,8 @@ def main(args, ds_init):
             args=args
         )
     num_layers = model.layers
-    if args.use_aim_weight is not None:
-        weight = torch.load(args.use_aim_weight,map_location='cpu')['model']
+    if args.use_clip_temporal is not None:
+        weight = torch.load(args.use_clip_temporal,map_location='cpu')['model']
         del weight['head.weight']
         del weight['head.bias']
         print(model.load_state_dict(weight,False))

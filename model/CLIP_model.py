@@ -368,11 +368,11 @@ class CLIPs(nn.Module):
         self.adapter_layers = adapter_layers
         self.num_frames = num_frames
         self.decoder_temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
-        self.use_aim_weight = args.use_aim_weight
+        self.use_clip_temporal = args.use_clip_temporal
         self.replay_token = args.replay_token
         self.memory_mode = args.memory_mode
         self.oracle = args.fine_tune_path
-        # if args.use_aim_weight:
+        # if args.use_clip_temporal:
         self.temporal_embedding = nn.Parameter(torch.zeros(1, num_frames, width))
         self.temporal_layer =args.temporal_layer
         self.fs_topk = args.fs_topk
@@ -560,7 +560,7 @@ class CLIPs(nn.Module):
         
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
         x = x + self.positional_embedding.to(x.dtype) #! Positional embedding, (8*10), 197, 768
-        if self.use_aim_weight:
+        if self.use_clip_temporal:
             temporal_embedding=self.temporal_embedding 
             if temporal_embedding.shape[1]!=(T):
                 temporal_embedding = F.interpolate(
