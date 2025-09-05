@@ -57,6 +57,7 @@ Place the downloaded files under the `./data/` directory as follows:
 ```
 ESSENTIAL/
 │── data/
+│   ├── clip_temporal.pth
 │   ├── TCD/
 │   │   ├── ...
 │   │   └── 
