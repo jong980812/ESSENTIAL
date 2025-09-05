@@ -6,7 +6,6 @@ from dataset.kinetics_cil import KineticsDataset, VideoMAE
 from dataset.ssv2_cil import SSVideoClsDataset
 from dataset.activitynet_cil import ActivitynetDataset
 from dataset.ucf101_cil import UCFVideoClsDataset
-from dataset.kinetics_uniform import Kinetics_uniform_Dataset
 import utils
 def is_double_list(obj):
     if isinstance(obj, list):
@@ -18,23 +17,23 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
     if args.data_set == 'Kinetics-400':
         if is_train is True:
             mode = 'train'
-            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
+            data_path = os.path.join(args.data_path ,'train')
             if not os.path.isdir(data_path):
-                data_path = '/data2/local_datasets/Kinetics-400/videos_train'
+                data_path = ''##Your backup path
         elif test_mode is True:
             mode = 'validation'
-            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'test')
+            data_path = os.path.join(args.data_path ,'test')
             if not os.path.isdir(data_path):
-                data_path = '/data2/local_datasets/Kinetics-400/videos_test'
+                data_path = ''##Your backup path
         else:  
             mode = 'validation'
-            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'val')
+            data_path = os.path.join(args.data_path ,'val')
             if not os.path.isdir(data_path):
                 data_path = '/data2/local_datasets/Kinetics-400/videos_val'
             if rehearsal:
-                data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
+                data_path = os.path.join(args.data_path ,'train')
                 if not os.path.isdir(data_path):
-                    data_path = '/data2/local_datasets/Kinetics-400/videos_train'
+                    data_path = ''##Your backup path
                 
         dataset = KineticsDataset(
             anno_list=anno_list,
@@ -56,47 +55,6 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             rehearsal=rehearsal,
             all_frames=all_frames
             )
-    if args.data_set == 'Kinetics-400_uniform':
-        if is_train is True:
-            mode = 'train'
-            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
-            if not os.path.isdir(data_path):
-                data_path = '/data2/local_datasets/Kinetics-400/videos_train'
-        elif test_mode is True:
-            mode = 'validation'
-            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'test')
-            if not os.path.isdir(data_path):
-                data_path = '/data2/local_datasets/Kinetics-400/videos_test'
-        else:  
-            mode = 'validation'
-            data_path = os.path.join('/local_datasets/kinetics400_320p' ,'val')
-            if not os.path.isdir(data_path):
-                data_path = '/data2/local_datasets/Kinetics-400/videos_val'
-            if rehearsal:
-                data_path = os.path.join('/local_datasets/kinetics400_320p' ,'train')
-                if not os.path.isdir(data_path):
-                    data_path = '/data2/local_datasets/Kinetics-400/videos_train'
-                
-        dataset = Kinetics_uniform_Dataset(
-            anno_list=anno_list,
-            data_path=data_path,
-            mode=mode,
-            clip_len=1,
-            num_segment=args.num_frames,
-            test_num_segment=args.test_num_segment,
-            test_num_crop=args.test_num_crop,
-            num_crop=1 if not test_mode else 3,
-            keep_aspect_ratio=True,
-            crop_size=args.input_size,
-            short_side_size=args.short_side_size,
-            new_height=256,
-            new_width=320,
-            args=args,
-            task_id = task_id,
-            rehearsal=rehearsal,
-            all_frames=all_frames,
-            frame_sample_rate=args.sampling_rate,
-            )
     elif args.data_set == 'SSV2':
         if is_train is True:
             mode = 'train'
@@ -104,15 +62,11 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             mode = 'validation'
         else:  
             mode = 'validation'
-        data_path ='/data2/local_datasets/something-something/something-something-v2-mp4'
+        data_path =args.data_path
         if not os.path.isdir(data_path):
-            data_path = '/local_datasets/something-something/something-something-v2-mp4'
-        if not os.path.isdir(data_path):
-            data_path ='/local_datasets/something-something-v2/videos'
-        if not os.path.isdir(data_path):
-            data_path ='/data2/local_datasets/something-something-v2/videos'
-        # if rehearsal:
-        #     data_path = '/local_datasets/ssv2_generation'
+            data_path = ''##Your backup path
+        # if not os.path.isdir(data_path):
+        #     data_path = ''##Your backup path
         dataset = SSVideoClsDataset(
             anno_list=anno_list,
             data_path=data_path,
@@ -141,9 +95,9 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             mode = 'validation'
         else:  
             mode = 'validation'
-        data_path = '/local_datasets/ucf101/videos'
+        data_path = args.data_path
         if not os.path.isdir(data_path):
-            data_path = '/local_datasets/ucf101/videos'
+            data_path = ''##Your backup path
 
         dataset = UCFVideoClsDataset(
             anno_list=anno_list,
@@ -172,11 +126,9 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             mode = 'validation'
         else:  
             mode = 'validation'
-        data_path = '/data2/local_datasets/hmdb51/videos'
+        data_path = args.data_path
         if not os.path.isdir(data_path):
-            data_path = '/local_datasets/HMDB51/videos'
-        if not os.path.isdir(data_path):
-            data_path = '/local_datasets/hmdb51/videos'
+            data_path = ''##Your backup path
 
         dataset = UCFVideoClsDataset(
             anno_list=anno_list,
@@ -205,11 +157,9 @@ def build_dataset(is_train, test_mode,anno_list,task_id, args,rehearsal=False,al
             mode = 'validation'
         else:  
             mode = 'validation'
-        data_path = '/local_datasets/Activitynet/videos_256/'
+        data_path = args.data_path
         if not os.path.isdir(data_path):
-            data_path = '/data2/local_datasets/Activity_256/videos_256/'
-            if not os.path.isdir(data_path):
-                data_path = '/local_datasets/Activitynet/videos_256/'
+            data_path = ''##Your backup path
         dataset = ActivitynetDataset(
             anno_list=anno_list,
             data_path=data_path,

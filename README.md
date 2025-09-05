@@ -46,8 +46,27 @@ conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=
 pip install -r requirements.txt
 ```
 ## 📂 Dataset
-...
 
+We provide the annotation files for ESSENTIAL on [Hugging Face Hub](https://huggingface.co/datasets/KHUjongseo/ESSENTIAL/tree/main).
+
+### Step 1. Download annotations
+Please download the annotation files from the link above.
+
+### Step 2. Organize dataset
+Place the downloaded files under the `./data/` directory as follows:
+```
+ESSENTIAL/
+│── data/
+│   ├── TCD/
+│   │   ├── ...
+│   │   └── 
+│   ├── vCLIMB/
+│   │   ├── ...
+│   │   └── 
+│   └── …
+```
+### Step 3. Prepare raw videos
+- The benchmark datasets (e.g., Kinetics-400) should be downloaded separately.  
 ## 🎯 Training
 ...
 
