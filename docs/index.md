@@ -230,7 +230,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
 @inproceedings{lee2025essential,
   title={ESSENTIAL: Episodic and Semantic Memory Integration for Video Class-Incremental Learning},
   author={Lee, Jongseo and Bae, Kyungho and Min, Kyle and Park, Gyeong-Moon and Choi, Jinwoo},
-  booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
+  booktitle={ICCV},
   year={2025}
 }
 ```
