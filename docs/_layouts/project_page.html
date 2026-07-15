@@ -2,11 +2,25 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="description"
-        content="">
-  <meta name="keywords" content="">
+  {% assign page_desc = page.description | default: "ESSENTIAL (ICCV 2025 Highlight): Episodic and Semantic Memory Integration for Video Class-Incremental Learning. A memory-efficient VCIL method that stores temporally sparse features plus learnable semantic prompts and reconstructs temporally dense features via a memory retrieval module." %}
+  <meta name="description" content="{{ page_desc }}">
+  <meta name="keywords" content="ESSENTIAL, video class-incremental learning, VCIL, continual learning, episodic memory, semantic memory, memory retrieval, ICCV 2025">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ page.title }}</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="./static/image/favicon.svg">
+
+  <!-- Open Graph / Twitter Card (link preview on Slack, X, etc.) -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ page.title }}">
+  <meta property="og:description" content="{{ page_desc }}">
+  <meta property="og:url" content="{{ page.url | absolute_url }}">
+  <meta property="og:image" content="{{ '/static/image/Figure1-2.png' | absolute_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ page.title }}">
+  <meta name="twitter:description" content="{{ page_desc }}">
+  <meta name="twitter:image" content="{{ '/static/image/Figure1-2.png' | absolute_url }}">
 
   <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
         rel="stylesheet">
@@ -48,9 +62,7 @@
         <div class="column has-text-centered">
           <h1 class="title is-1 publication-title">{{ page.title }}</h1>
           {% if page.highlight %}
-          <p style="font-size: 2.0rem; font-weight: bold; color: #df5b56;">
-            🏆 {{ page.highlight }}
-          </p>
+          <p><span class="publication-highlight">🏆 {{ page.highlight }}</span></p>
           {% endif %}
           {% if page.authors %}
           <div class="is-size-5 publication-authors">
@@ -125,10 +137,21 @@
   </div>
 </section>
 
+<!-- Sticky section navigation -->
+<nav class="section-nav">
+  <div class="section-nav-inner">
+    <a href="#abstract">Abstract</a>
+    <a href="#motivation">Motivation</a>
+    <a href="#method">Method</a>
+    <a href="#results">Results</a>
+    <a href="#citation">BibTeX</a>
+  </div>
+</nav>
+
 <section class="section">
 <div class="container is-max-desktop">
 <!-- <div class="container is-widescreen"> -->
-  
+
 
 <div class="content">
   {{ content }}

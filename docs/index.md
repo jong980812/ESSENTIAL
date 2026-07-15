@@ -29,7 +29,7 @@ highlight: "ICCV 2025 Highlight Paper"
 <!-- Using HTML to center the abstract -->
 <div class="columns is-centered has-text-centered">
     <div class="column is-four-fifths">
-        <h2>Abstract</h2>
+        <h2 id="abstract">Abstract</h2>
         <div class="content has-text-justified">
 In this work, we tackle the problem of video class-incremental learning (VCIL). Many existing VCIL methods mitigate catastrophic forgetting by rehearsal training with a few temporally dense samples stored in episodic memory, which is memory-inefficient. Alternatively, some methods store temporally sparse samples, sacrificing essential temporal information and thereby resulting in inferior performance. To address this trade-off between memory-efficiency and performance, we propose EpiSodic and SEmaNTIc memory integrAtion for video class-incremental Learning(ESSENTIAL). ESSENTIAL consists of episodic memory for storing temporally sparse features and semantic memory for storing general knowledge represented by learnable prompts. We introduce a novel memory retrieval (MR) module that integrates episodic memory and semantic prompts through cross-attention, enabling the retrieval of temporally dense features from temporally sparse features. We rigorously validate ESSENTIAL on diverse datasets: UCF-101, HMDB51, and Something-Something-V2 from the TCD benchmark and UCF-101, ActivityNet, and Kinetics-400 from the vCLIMB benchmark. Remarkably, with significantly reduced memory, ESSENTIAL achieves favorable performance on the benchmarks.
         </div>
@@ -60,7 +60,7 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
 
 
 
-## 💡 Motivation
+## 💡 Motivation {#motivation}
 
 ESSENTIAL is designed to overcome the trade-off in VCIL between **performance** and **memory-efficiency**. <br>
 In Figure1, 
@@ -77,7 +77,7 @@ In Figure1,
 
 <!-- ## 🎯 Method: *ESSENTIAL* -->
 <!-- ## 🎯 Method: <span style="font-family: 'Courier New', monospace; font-weight: bold; color: #000000ff;">ESSENTIAL</span> -->
-## 🎯 Philosophy
+## 🎯 Philosophy {#method}
 
 The core philosophy of  <span style="font-family: 'Courier New', monospace; font-weight: bold; color: #111111ff;">ESSENTIAL</span> is to achieve a better trade-off between **memory-efficiency** and **performance** in video class-incremental learning.
 
@@ -136,7 +136,7 @@ During rehearsal, the MR module integrates episodic memory and semantic memory v
   </p>
 </div>
 
-## 📈 Experimental Results
+## 📈 Experimental Results {#results}
 
 <div align="center">
   <h3>📊 Comparison with the state-of-the-arts on the vCLIMB Benchmark</h3>
@@ -225,12 +225,14 @@ We conduct extensive ablation studies to examine the design choices of the propo
 
 
 
-## Citation
-```
-@inproceedings{lee2025essential,
+## Citation {#citation}
+
+<div class="bibtex-box">
+  <button id="bibtex-copy-btn" class="bibtex-copy-btn" onclick="copyBibtex()">Copy</button>
+  <pre><code id="bibtex-content">@inproceedings{lee2025essential,
   title={ESSENTIAL: Episodic and Semantic Memory Integration for Video Class-Incremental Learning},
   author={Lee, Jongseo and Bae, Kyungho and Min, Kyle and Park, Gyeong-Moon and Choi, Jinwoo},
   booktitle={ICCV},
   year={2025}
-}
-```
+}</code></pre>
+</div>

@@ -17,6 +17,11 @@
 # Build settings
 markdown: kramdown
 
+# Deployment URL — used to build absolute URLs for Open Graph / Twitter cards.
+# NOTE: verify these match your GitHub Pages deployment (adjust if needed).
+url: "https://khu-vll.github.io"
+baseurl: "/ESSENTIAL"
+
 # Exclude from processing.
 # The following items will not be processed, by default. Create a custom list
 # to override the default setting.

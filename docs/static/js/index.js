@@ -1,56 +1,65 @@
-$(document).ready(function() {
-    // Check for click events on the navbar burger icon
-    $(".navbar-burger").click(function() {
-      // Toggle the "is-active" class on both the "navbar-burger" and the "navbar-menu"
-      $(".navbar-burger").toggleClass("is-active");
-      $(".navbar-menu").toggleClass("is-active");
+// ESSENTIAL project page — minimal interactions.
+// (Removed unused Nerfies carousel/slider/interpolation code that referenced
+//  undefined globals and threw ReferenceError in the console.)
 
-    });
+$(document).ready(function () {
+  // Mobile navbar burger toggle (harmless no-op if the burger is absent).
+  $(".navbar-burger").click(function () {
+    $(".navbar-burger").toggleClass("is-active");
+    $(".navbar-menu").toggleClass("is-active");
+  });
 
-    var options = {
-			slidesToScroll: 1,
-			slidesToShow: 3,
-			loop: true,
-			infinite: true,
-			autoplay: false,
-			autoplaySpeed: 3000,
+  // Highlight the active section in the sticky nav while scrolling.
+  var $navLinks = $(".section-nav a");
+  var sections = $navLinks
+    .map(function () {
+      var id = $(this).attr("href");
+      return id && id.charAt(0) === "#" && document.querySelector(id) ? id : null;
+    })
+    .get();
+
+  function onScroll() {
+    var pos = window.scrollY + 120;
+    var current = sections[0];
+    for (var i = 0; i < sections.length; i++) {
+      var el = document.querySelector(sections[i]);
+      if (el && el.offsetTop <= pos) current = sections[i];
     }
+    $navLinks.removeClass("is-active");
+    $navLinks.filter('[href="' + current + '"]').addClass("is-active");
+  }
+  if (sections.length) {
+    $(window).on("scroll", onScroll);
+    onScroll();
+  }
+});
 
-		// Initialize all div with carousel class
-    var carousels = bulmaCarousel.attach('.carousel', options);
-
-    // Loop on each carousel initialized
-    for(var i = 0; i < carousels.length; i++) {
-    	// Add listener to  event
-    	carousels[i].on('before:show', state => {
-    		console.log(state);
-    	});
-    }
-
-    // Access to bulmaCarousel instance of an element
-    var element = document.querySelector('#my-element');
-    if (element && element.bulmaCarousel) {
-    	// bulmaCarousel instance is available as element.bulmaCarousel
-    	element.bulmaCarousel.on('before-show', function(state) {
-    		console.log(state);
-    	});
-    }
-
-    /*var player = document.getElementById('interpolation-video');
-    player.addEventListener('loadedmetadata', function() {
-      $('#interpolation-slider').on('input', function(event) {
-        console.log(this.value, player.duration);
-        player.currentTime = player.duration / 100 * this.value;
-      })
-    }, false);*/
-    preloadInterpolationImages();
-
-    $('#interpolation-slider').on('input', function(event) {
-      setInterpolationImage(this.value);
-    });
-    setInterpolationImage(0);
-    $('#interpolation-slider').prop('max', NUM_INTERP_FRAMES - 1);
-
-    bulmaSlider.attach();
-
-})
+// Copy the BibTeX entry to the clipboard.
+function copyBibtex() {
+  var el = document.getElementById("bibtex-content");
+  if (!el) return;
+  var text = el.innerText;
+  var btn = document.getElementById("bibtex-copy-btn");
+  var done = function () {
+    if (!btn) return;
+    var prev = btn.innerText;
+    btn.innerText = "Copied!";
+    btn.classList.add("is-copied");
+    setTimeout(function () {
+      btn.innerText = prev;
+      btn.classList.remove("is-copied");
+    }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done);
+  } else {
+    // Fallback for non-secure contexts / older browsers.
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+    done();
+  }
+}
