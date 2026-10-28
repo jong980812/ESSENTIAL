@@ -22,6 +22,10 @@ markdown: kramdown
 url: "https://jong980812.github.io"
 baseurl: "/ESSENTIAL"
 
+# NOTE: this config is only used when GitHub Pages builds from the /docs folder.
+# If Pages is set to build from the repository root instead, the root _config.yml
+# is used; it sets asset_root: "/docs" so the templates still find static/.
+
 # Exclude from processing.
 # The following items will not be processed, by default. Create a custom list
 # to override the default setting.

@@ -1,0 +1,35 @@
+# Fallback Jekyll config for GitHub Pages builds from the repository ROOT.
+#
+# The project page lives in docs/ and is normally built with
+#   Settings -> Pages -> Build and deployment -> Source: "Deploy from a branch",
+#   Folder: /docs
+# In that setup docs/_config.yml is used and this file is ignored.
+#
+# If Pages is instead set to build from "/ (root)", Jekyll would not find
+# docs/_layouts and the page would render as bare, unstyled markdown with all
+# static assets 404-ing. This file makes a root build produce the same page:
+# it points Jekyll at docs/_layouts and tells the templates that assets live
+# under /docs. Keep url/baseurl in sync with docs/_config.yml.
+
+markdown: kramdown
+
+url: "https://jong980812.github.io"
+baseurl: "/ESSENTIAL"
+
+# Layouts are kept next to the page content.
+layouts_dir: docs/_layouts
+
+# Prefix for /static/... asset paths used by the layout and index.md.
+# Empty (unset) when building from /docs; "/docs" when building from the root.
+asset_root: "/docs"
+
+# Keep the training code out of the published site.
+exclude:
+  - "*.py"
+  - dataset
+  - model
+  - scripts
+  - requirements.txt
+  - LICENSE
+  - README.md
+  - docs/README.md

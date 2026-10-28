@@ -2,6 +2,8 @@
 <html>
 <head>
   <meta charset="utf-8">
+  {%- comment -%} Asset prefix: "" when Pages builds from /docs, "/docs" when it builds from the repo root (see root _config.yml). {%- endcomment -%}
+  {% assign asset_root = site.asset_root | default: "" %}
   {% assign page_desc = page.description | default: "ESSENTIAL (ICCV 2025 Highlight): Episodic and Semantic Memory Integration for Video Class-Incremental Learning. A memory-efficient VCIL method that stores temporally sparse features plus learnable semantic prompts and reconstructs temporally dense features via a memory retrieval module." %}
   <meta name="description" content="{{ page_desc }}">
   <meta name="keywords" content="ESSENTIAL, video class-incremental learning, VCIL, continual learning, episodic memory, semantic memory, memory retrieval, ICCV 2025">
@@ -9,29 +11,29 @@
   <title>{{ page.title }}</title>
 
   <!-- Favicon -->
-  <link rel="icon" type="image/svg+xml" href="{{ '/static/image/favicon.svg' | relative_url }}">
+  <link rel="icon" type="image/svg+xml" href="{{ asset_root | append: '/static/image/favicon.svg' | relative_url }}">
 
   <!-- Open Graph / Twitter Card (link preview on Slack, X, etc.) -->
   <meta property="og:type" content="website">
   <meta property="og:title" content="{{ page.title }}">
   <meta property="og:description" content="{{ page_desc }}">
   <meta property="og:url" content="{{ page.url | absolute_url }}">
-  <meta property="og:image" content="{{ '/static/image/Figure1-2.png' | absolute_url }}">
+  <meta property="og:image" content="{{ asset_root | append: '/static/image/Figure1-2.png' | absolute_url }}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ page.title }}">
   <meta name="twitter:description" content="{{ page_desc }}">
-  <meta name="twitter:image" content="{{ '/static/image/Figure1-2.png' | absolute_url }}">
+  <meta name="twitter:image" content="{{ asset_root | append: '/static/image/Figure1-2.png' | absolute_url }}">
 
   <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
         rel="stylesheet">
 
-  <link rel="stylesheet" href="{{ '/static/css/bulma.min.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ asset_root | append: '/static/css/bulma.min.css' | relative_url }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
-  <link rel="stylesheet" href="{{ '/static/css/index.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ asset_root | append: '/static/css/index.css' | relative_url }}">
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-  <script defer src="{{ '/static/js/fontawesome.all.min.js' | relative_url }}"></script>
-  <script src="{{ '/static/js/index.js' | relative_url }}"></script>
+  <script defer src="{{ asset_root | append: '/static/js/fontawesome.all.min.js' | relative_url }}"></script>
+  <script src="{{ asset_root | append: '/static/js/index.js' | relative_url }}"></script>
 
   <!-- MathJax -->
   <script>

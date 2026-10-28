@@ -26,6 +26,7 @@ code: https://github.com/KHU-VLL/ESSENTIAL
 highlight: "ICCV 2025 Highlight Paper"
 ---
 
+{% assign img = site.asset_root | default: "" | append: "/static/image" | relative_url %}
 <!-- Using HTML to center the abstract -->
 <div class="columns is-centered has-text-centered">
     <div class="column is-four-fifths">
@@ -41,14 +42,14 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
 <div style="display: flex; justify-content: center; align-items: flex-start; gap: 0px;">
   
   <figure style="flex: 0 0 55%; text-align: center;">
-    <img src="static/image/teaser.png" alt="Teaser Figure" style="width: 100%;">
+    <img src="{{ img }}/teaser.png" alt="Teaser Figure" style="width: 100%;">
     <figcaption style="font-size: 0.9em; color: gray; margin-top: 5px;">
       1. Performance-memory plot on the UCF-101 dataset from the TCD benchmark
     </figcaption>
   </figure>
 
   <figure style="flex: 0 0 44%; text-align: center;">
-    <img src="static/image/motivation.png" alt="Motivation Figure" style="width: 100%;">
+    <img src="{{ img }}/motivation.png" alt="Motivation Figure" style="width: 100%;">
     <figcaption style="font-size: 0.9em; color: gray; margin-top: 5px;">
       2. MR module achieves a better performance-memory-efficiency trade-off.
     </figcaption>
@@ -56,7 +57,7 @@ In this work, we tackle the problem of video class-incremental learning (VCIL). 
 
 </div>
  -->
-![Turing Machine](static/image/Figure1-2.png)
+![Turing Machine]({{ img }}/Figure1-2.png)
 
 
 
@@ -92,7 +93,7 @@ The core philosophy of  <span style="font-family: 'Courier New', monospace; font
 
 ## ⚙️ Architecture
 
-<img src="static/image/Training.png" alt="Visual and Temporal Encoding" style="width:100%;">
+<img src="{{ img }}/Training.png" alt="Visual and Temporal Encoding" style="width:100%;">
 <div align="center">
   <h4>Visual and temporal feature extraction</h4>
   <p>
@@ -103,7 +104,7 @@ The core philosophy of  <span style="font-family: 'Courier New', monospace; font
 </div>
 ---
 
-<img src="static/image/mr_module.png" alt="Memory Retrieval Module" style="width:100%;">
+<img src="{{ img }}/mr_module.png" alt="Memory Retrieval Module" style="width:100%;">
 
 <div align="center">
   <h4>Memory Retrieval (MR) module</h4>
@@ -119,12 +120,12 @@ The core philosophy of  <span style="font-family: 'Courier New', monospace; font
 
 ---
 <!-- 
-<img src="static/image/rehearsal.png" alt="Rehearsal Training" style="width:100%;">
+<img src="{{ img }}/rehearsal.png" alt="Rehearsal Training" style="width:100%;">
 
 ### Rehearsal training with retrieved features   
 During rehearsal, the MR module integrates episodic memory and semantic memory via cross-attention, retrieving temporally dense features from temporally sparse features. These retrieved features are replayed for rehearsal training, allowing ESSENTIAL to mitigate catastrophic forgetting while maintaining high memory-efficiency.
  -->
- <img src="static/image/rehearsal.png" alt="Rehearsal Training" style="width:100%;">
+ <img src="{{ img }}/rehearsal.png" alt="Rehearsal Training" style="width:100%;">
 
 <div align="center">
   <h4>Rehearsal training with retrieved features</h4>
@@ -146,7 +147,7 @@ During rehearsal, the MR module integrates episodic memory and semantic memory v
     A dash (-) denotes a value not reported in the original paper.  
     <b>ESSENTIAL</b> achieves the best performance with minimal memory consumption across all datasets in the benchmark.
   </p>
-  <img src="static/image/vclimb.png" alt="Comparison on vCLIMB Benchmark" style="width:90%;">
+  <img src="{{ img }}/vclimb.png" alt="Comparison on vCLIMB Benchmark" style="width:90%;">
 </div>
 
 <!-- ---
@@ -158,7 +159,7 @@ We report the Top-1 average incremental accuracy (%) and the total memory usage 
 We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
 The best are in **bold** and the second best are _underscored_.
 
-<img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
+<img src="{{ img }}/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
 
 </div>
 
@@ -169,7 +170,7 @@ The best are in **bold** and the second best are _underscored_.
 #### 🔍 Ablation study
 We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
 
-<img src="static/image/ablation.png" alt="Ablation Study" style="width:90%;">
+<img src="{{ img }}/ablation.png" alt="Ablation Study" style="width:90%;">
 
 </div> -->
 ---
@@ -180,7 +181,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
     We indicate the backbone model in parentheses. An asterisk (*) denotes estimated memory usage.  
     The best are in <b>bold</b> and the second best are <i>underscored</i>.
   </p>
-  <img src="static/image/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
+  <img src="{{ img }}/TCD.png" alt="Comparison on TCD Benchmark" style="width:90%;">
 </div>
 
 ---
@@ -190,7 +191,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
   <p>
     We conduct extensive ablation studies to examine the design choices of the proposed method on the SSV2 (10 × 9 tasks).
   </p>
-  <img src="static/image/ablation.png" alt="Ablation Study" style="width:90%;">
+  <img src="{{ img }}/ablation.png" alt="Ablation Study" style="width:90%;">
 </div>
 
 ---
@@ -200,7 +201,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
   <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; max-width: 1500px;">
     <!-- 첫 번째 그림+설명 -->
     <div style="width: 45%; text-align: center;">
-      <img src="static/image/robust.png" alt="Figure 1" style="width: 100%;">
+      <img src="{{ img }}/robust.png" alt="Figure 1" style="width: 100%;">
       <h4>Is ESSENTIAL robust to a decreasing number of frame features?</h4>
       <p style="font-size: 0.95em; color: #444; margin-top: 8px; text-align: justify;">
         The results indicate that ESSENTIAL effectively mitigates forgetting even when storing temporally sparse features, thanks to the retrieval capability of the MR module. This retrieval enables us to store only temporally sparse features in episodic memory, leading to high memory-efficiency.
@@ -208,7 +209,7 @@ We conduct extensive ablation studies to examine the design choices of the propo
     </div>
     <!-- 두 번째 그림+설명 -->
     <div style="width: 49%; text-align: center;">
-      <img src="static/image/tsne.png" alt="Figure 2" style="width: 100%;">
+      <img src="{{ img }}/tsne.png" alt="Figure 2" style="width: 100%;">
       <h4>Does the MR module effectively retrieve temporally dense features?</h4>
       <p style="font-size: 0.95em; color: #444; margin-top: 8px; text-align: justify;">
         We can qualitatively observe that the retrieved feature vectors, 
