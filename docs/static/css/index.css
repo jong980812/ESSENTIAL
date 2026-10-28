@@ -67,11 +67,235 @@ body {
   scroll-margin-top: 6rem;
 }
 
+/* ---- Hero ---- */
+.publication-hero {
+  background:
+    radial-gradient(900px 420px at 50% -10%, rgba(223, 91, 86, 0.10), transparent 70%),
+    linear-gradient(180deg, #fffdfc 0%, #ffffff 100%);
+  border-bottom: 1px solid #f0eceb;
+}
+.publication-hero .hero-body {
+  padding-top: 3.5rem;
+  padding-bottom: 2.75rem;
+}
+/* Responsive title: Bulma's .is-1 is a fixed 3rem, far too large on phones. */
+.title.is-1.publication-title {
+  font-size: clamp(1.7rem, 1rem + 2.6vw, 2.9rem);
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  margin-bottom: 1rem;
+}
+.publication-hero .publication-authors {
+  margin-bottom: 0.35rem;
+}
+.publication-hero .publication-links {
+  margin-top: 0.75rem;
+}
+.publication-hero .link-block .button {
+  font-weight: 600;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+}
+.publication-hero .link-block .button:hover {
+  background-color: #df5b56;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(223, 91, 86, 0.28);
+}
+
+/* ---- Section headings ---- */
+.content h2 {
+  position: relative;
+  margin-top: 3.25rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid #ececec;
+  font-family: 'Google Sans', 'Noto Sans', sans-serif;
+  letter-spacing: -0.01em;
+}
+.content h2::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 3.25rem;
+  height: 3px;
+  border-radius: 2px;
+  background: #df5b56;
+}
+.content h2#abstract {
+  border-bottom: none;
+  margin-top: 0;
+  padding-bottom: 0;
+}
+.content h2#abstract::after {
+  left: 50%;
+  bottom: -0.55rem;
+  transform: translateX(-50%);
+}
+.content h3 {
+  font-family: 'Google Sans', 'Noto Sans', sans-serif;
+  margin-top: 2.5rem;
+}
+.content h4 {
+  font-family: 'Google Sans', 'Noto Sans', sans-serif;
+}
+.content hr {
+  background-color: #ececec;
+  height: 1px;
+  margin: 2.5rem 0;
+}
+.content blockquote {
+  border-left-color: #df5b56;
+  background: #fff7f6;
+}
+
 /* Figure styling: rounded corners + soft shadow. */
 .content img {
   border-radius: 8px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
 }
+.content img.is-zoomable {
+  cursor: zoom-in;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.content img.is-zoomable:hover {
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.13);
+  transform: translateY(-1px);
+}
+.content img.is-zoomable:focus-visible {
+  outline: 3px solid rgba(223, 91, 86, 0.6);
+  outline-offset: 3px;
+}
+
+/* ---- Lightbox ---- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(20, 20, 22, 0.88);
+  cursor: zoom-out;
+}
+.lightbox[hidden] {
+  display: none;
+}
+.lightbox img {
+  max-width: min(96vw, 1600px);
+  max-height: 92vh;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.lightbox-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+body.lightbox-open {
+  overflow: hidden;
+}
+
+/* ---- Analysis: two figure+text columns, stacked on phones ---- */
+.analysis-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1.75rem;
+  margin-top: 1rem;
+}
+.analysis-item {
+  flex: 1 1 320px;
+  max-width: 48%;
+  text-align: center;
+}
+.analysis-item h4 {
+  margin-top: 1rem;
+  margin-bottom: 0.4rem;
+}
+.analysis-text {
+  font-size: 0.95em;
+  color: #444;
+  margin-top: 0.5rem;
+  text-align: justify;
+}
+@media (max-width: 768px) {
+  .analysis-item {
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+}
+
+/* ---- Back to top ---- */
+.back-to-top {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 40;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #363636;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s, background 0.15s ease;
+}
+.back-to-top.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+.back-to-top:hover {
+  background: #df5b56;
+  color: #fff;
+}
+
+/* ---- Footer ---- */
+.footer {
+  background: #fafafa;
+  border-top: 1px solid #ececec;
+  padding: 2.5rem 1.5rem;
+}
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.75rem;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+.footer-links a {
+  color: #363636;
+}
+.footer-links a:hover {
+  color: #df5b56;
+}
+.footer-note {
+  font-size: 0.9rem;
+  color: #7a7a7a;
+}
+
 
 /* BibTeX block with copy button. */
 .bibtex-box {
@@ -263,4 +487,28 @@ body {
 }
 #interpolation-image-wrapper img {
   border-radius: 5px;
+}
+
+/* ---- Phone adjustments (kept last so they win over the rules above) ---- */
+@media (max-width: 768px) {
+  /* Justified text on narrow columns leaves ugly rivers of whitespace. */
+  .has-text-justified,
+  .analysis-text {
+    text-align: left !important;
+  }
+  .publication-hero .hero-body {
+    padding-top: 2.25rem;
+    padding-bottom: 1.75rem;
+  }
+  .content h2 {
+    margin-top: 2.5rem;
+  }
+  /* Keep the Copy button clear of the first BibTeX line. */
+  .bibtex-box pre {
+    padding-top: 2.6rem;
+  }
+  .back-to-top {
+    right: 0.9rem;
+    bottom: 0.9rem;
+  }
 }

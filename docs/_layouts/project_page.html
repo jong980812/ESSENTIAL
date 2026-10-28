@@ -57,7 +57,7 @@
 <body>
 
 
-<section class="hero">
+<section class="hero publication-hero" id="top">
   <div class="hero-body">
     <div class="container is-max-desktop">
       <div class="columns is-centered">
@@ -131,6 +131,16 @@
                 </a>
               </span>
               {% endif %}
+              <!-- BibTeX (in-page). -->
+              <span class="link-block">
+                <a href="#citation"
+                   class="button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fas fa-quote-right"></i>
+                  </span>
+                  <span>BibTeX</span>
+                </a>
+              </span>
             </div>
           </div>
         </div>
@@ -165,9 +175,15 @@
 <footer class="footer">
   <div class="container">
     <div class="columns is-centered">
-      <div class="column is-8">
-        <div class="content">
+      <div class="column is-8 has-text-centered">
+        <div class="footer-links">
+          {% if page.paper %}<a href="{{ page.paper }}" target="_blank" rel="noopener"><i class="fas fa-file-pdf"></i> arXiv</a>{% endif %}
+          {% if page.code %}<a href="{{ page.code }}" target="_blank" rel="noopener"><i class="fab fa-github"></i> Code</a>{% endif %}
+          <a href="#citation"><i class="fas fa-quote-right"></i> BibTeX</a>
+        </div>
+        <div class="content footer-note">
           <p>
+            ESSENTIAL &middot; ICCV 2025 &middot; Kyung Hee University, Danggeun Market Inc., Intel Labs, Korea University<br>
             Website template borrowed from <a href="https://github.com/nerfies/nerfies.github.io">NeRFies</a> and <a href="https://github.com/shunzh/project_website">the Jekyll fork</a>.
           </p>
         </div>
@@ -175,6 +191,14 @@
     </div>
   </div>
 </footer>
+
+<!-- Click-to-zoom overlay for figures and result tables. -->
+<div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Enlarged figure" hidden>
+  <button type="button" class="lightbox-close" aria-label="Close">&times;</button>
+  <img src="" alt="">
+</div>
+
+<a href="#top" id="back-to-top" class="back-to-top" aria-label="Back to top"><i class="fas fa-arrow-up"></i></a>
 
 </body>
 </html>
